@@ -436,7 +436,7 @@ colorscheme catppuccin-frappe
 highlight Structure guifg=#e78284
 highlight debugBreakpoint guifg=#303446 guibg=#e78284
 highlight debugBreakpointDisabled guifg=#303446 guibg=#949cbb
-highlight DiffChange guibg=#42434d
+highlight DiffText gui=underline
 
 set termguicolors
 hi! link qfFileName Comment
