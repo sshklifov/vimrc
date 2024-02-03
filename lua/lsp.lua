@@ -159,7 +159,6 @@ local OnAttach = function(client, bufnr)
 end
 
 function GetCachePath()
-  -- return ""
   return "/home/" .. os.getenv("USER") ..  "/ccls-cache"
 end
 
