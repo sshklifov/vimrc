@@ -174,6 +174,17 @@ autocmd FileType qf setlocal cursorline
 """"""""""""""""""""""""""""Quickfix"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
+function! s:OpenQfResults()
+  let len = getqflist({"size": 1})['size']
+  if len == 0
+    echo "No results"
+  elseif len == 1
+    cc
+  else
+    copen
+  endif
+endfunction
+
 let g:exclude_dirs = ["ccls-cache", ".git", "Debug", "Release"]
 let g:exclude_files = ["compile_commands.json", ".ccls"]
 
@@ -199,7 +210,7 @@ function! s:OldFiles(read_shada)
   let items = deepcopy(v:oldfiles)
   let items = map(items, {_, f -> {"filename": f, "lnum": 1, 'text': fnamemodify(f, ":t")}})
   call setqflist([], ' ', {'title': 'Oldfiles', 'items': items})
-  copen
+  call s:OpenQfResults()
 endfunction
 
 command -nargs=0 -bang Old call s:OldFiles(<bang>0)
@@ -243,13 +254,7 @@ function! s:Grep(regex, where)
 
   call chanclose(id, 'stdin')
   call jobwait([id]) " Need to know length of items
-
-  let n = len(getqflist())
-  if n == 0
-    echo "No results"
-  else
-    copen
-  endif
+  call s:OpenQfResults()
 endfunction
 
 function! s:GrepQuickfixFiles(regex)
@@ -362,15 +367,7 @@ function! s:ShowBuffers(pat)
   let items = map(range(1, bufnr('$')), function("s:GetBufferItem"))
   let items = filter(items, "!empty(v:val)")
   call setqflist([], 'r', {'title' : 'Buffers', 'items' : items})
-
-  let n = len(items)
-  if n == 0
-    echo "No results"
-  elseif n == 1
-    cc
-  else
-    copen
-  endif
+  call s:OpenQfResults()
 endfunction
 
 nnoremap <silent> <leader>buf :call <SID>ShowBuffers("")<CR>
@@ -641,7 +638,6 @@ set updatetime=500
 set completeopt=menuone
 inoremap <silent> <C-Space> <C-X><C-O>
 
-
 " http://vim.wikia.com/wiki/Automatically_append_closing_characters
 inoremap {<CR> {<CR>}<C-o>O
 
@@ -804,31 +800,20 @@ function! s:FindInQuickfix(bang, dir, pat, ...)
   let id = s:Find(a:bang, a:dir, flags, function("PopulateQuickfix"))
 
   call jobwait([id]) " Need to know length of items
-  let n = len(getqflist())
-  if n == 0
-    echo "No results"
-  elseif n == 1
-    cc
-  else
-    copen
-  endif
+  call s:OpenQfResults()
 endfunction
 
 function! s:GetWorkspace()
-  let worktree = FugitiveWorkTree()
-  if !empty(worktree)
-    return worktree
-  endif
-
-  echo "Not in workspace"
-  return ""
+  return FugitiveWorkTree()
 endfunction
 
 function! s:FindInWorkspace(bang, pat)
   let ws = s:GetWorkspace()
-  if !empty(ws)
-    call s:FindInQuickfix(a:bang, ws, a:pat)
+  if empty(ws)
+    echo "Not in workspace"
+    return
   endif
+  call s:FindInQuickfix(a:bang, ws, a:pat)
 endfunction
 
 command! -nargs=? -bang List call <SID>FindInQuickfix("<bang>", getcwd(), <q-args>, ['-maxdepth', 1])
@@ -838,6 +823,7 @@ command! -nargs=? -bang Workspace call <SID>FindInWorkspace("<bang>", <q-args>)
 function! s:Index(arg)
   let ws = s:GetWorkspace()
   if ws == ""
+    echo "Not in workspace"
     return
   endif
   let cache = luaeval("GetCachePath()")
@@ -860,7 +846,7 @@ function! s:Index(arg)
   let res = map(res, {_, v -> s:Join(ws, v[0:-6])})
   let items = map(res, "#{filename: v:val, lnum: 1, text: fnamemodify(v:val, ':t')}")
   call setqflist([], ' ', #{title: "Index", items: items})
-  copen
+  call s:OpenQfResults()
 endfunction
 
 command! -nargs=? -bang Index call <SID>Index(<q-args>)
@@ -893,7 +879,6 @@ endfunction
 " Available modes:
 " - exe. Pass executable + arguments
 " - pname. Process name to attach. Will be resolved to a pid.
-" - core. Pass a coredump to debug
 " Other arguments:
 " - symbols. Whether to load symbols or not. Used for faster loading of gdb.
 " - ssh. Launch GDB over ssh with the given address.
@@ -958,13 +943,6 @@ function! s:DebugStartPost(args)
     else
       call TermDebugSendCommand("start")
     endif
-  elseif has_key(a:args, "core")
-    let core = a:args["core"]
-    let prog = s:ProgramCoreMapping(core)
-    if !empty(prog)
-      call TermDebugSendCommand("file" . prog)
-      call TermDebugSendCommand("core " . core)
-    endif
   endif
 
   if TermDebugGetPid() > 0
@@ -987,7 +965,7 @@ function! s:DebugStopPre()
 endfunction
 
 function! s:GetDebugLoc()
-  let absolute = v:false
+  const absolute = v:false
   if absolute
     let file = expand("%:p")
   else
