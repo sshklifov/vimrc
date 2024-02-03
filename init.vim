@@ -346,9 +346,6 @@ function! s:ShowBuffers(pat)
   endif
 
   function! s:GetBufferItem(_, n) closure
-    if !buflisted(a:n) || !bufloaded(a:n)
-      return {}
-    endif
     let name = expand('#' . a:n . ':p')
     if !filereadable(name) || match(name, pat) < 0
       return {}
@@ -391,7 +388,7 @@ function! BufferCompl(ArgLead, CmdLine, CursorPos)
   endif
 
   let names = map(range(1, bufnr('$')), "bufname(v:val)")
-  let names = filter(names, "!empty(v:val)")
+  let names = filter(names, "filereadable(v:val)")
   let compl = []
   for name in names
     let parts = split(name, "/")
@@ -420,7 +417,7 @@ function! s:IsQfOpen()
 endfunction
 
 function! s:ToggleQf()
-  if <SID>IsQfOpen()
+  if s:IsQfOpen()
     cclose
   else
     copen
@@ -710,7 +707,7 @@ function! s:OpenSource()
 
   "Default to using FindInWorkspace
   let nobang = ""
-  call <SID>FindInWorkspace(nobang, expand("%:t:r") . ".c")
+  call s:FindInWorkspace(nobang, expand("%:t:r") . ".c")
 endfunction
 
 function! s:OpenHeader()
@@ -731,7 +728,7 @@ function! s:OpenHeader()
 
   "Default to using FindInWorkspace
   let nobang = ""
-  call <SID>FindInWorkspace(nobang, expand("%:t:r") . ".h")
+  call s:FindInWorkspace(nobang, expand("%:t:r") . ".h")
 endfunction
 
 nmap <silent> <leader>cpp :call <SID>OpenSource()<CR>
@@ -804,7 +801,7 @@ function! s:FindInQuickfix(bang, dir, pat, ...)
 
   " Perform find operation
   call setqflist([], ' ', {'title' : 'Find', 'items' : []})
-  let id = <SID>Find(a:bang, a:dir, flags, function("PopulateQuickfix"))
+  let id = s:Find(a:bang, a:dir, flags, function("PopulateQuickfix"))
 
   call jobwait([id]) " Need to know length of items
   let n = len(getqflist())
@@ -830,7 +827,7 @@ endfunction
 function! s:FindInWorkspace(bang, pat)
   let ws = s:GetWorkspace()
   if !empty(ws)
-    call <SID>FindInQuickfix(a:bang, ws, a:pat)
+    call s:FindInQuickfix(a:bang, ws, a:pat)
   endif
 endfunction
 
@@ -860,7 +857,7 @@ function! s:Index(arg)
 
   let res = system(["find", hierarchy, "-type", "f", regex, pat, "-printf", "%P\n"])
   let res = split(res, nr2char(10))
-  let res = map(res, {_, v -> <SID>Join(ws, v[0:-6])})
+  let res = map(res, {_, v -> s:Join(ws, v[0:-6])})
   let items = map(res, "#{filename: v:val, lnum: 1, text: fnamemodify(v:val, ':t')}")
   call setqflist([], ' ', #{title: "Index", items: items})
   copen
