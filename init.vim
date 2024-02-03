@@ -849,7 +849,24 @@ function! s:Index(arg)
   call s:OpenQfResults()
 endfunction
 
-command! -nargs=? -bang Index call <SID>Index(<q-args>)
+command! -nargs=? Index call <SID>Index(<q-args>)
+
+function! s:ShowWorkspaces(bang)
+  if !empty(a:bang)
+    let names = deepcopy(v:oldfiles)
+  else
+    let names = map(range(1, bufnr('$')), "bufname(v:val)")
+    let names = filter(names, "filereadable(v:val)")
+  endif
+  let git = filter(map(names, "FugitiveExtractGitDir(v:val)"), "!empty(v:val)")
+  let git = uniq(sort(git))
+  let repos = map(git, "fnamemodify(v:val, ':h')")
+  let items = map(repos, {_, f -> {"filename": f, "lnum": 1, 'text': fnamemodify(f, ":t")}})
+  call setqflist([], ' ', {'title': 'Git', 'items': items})
+  call s:OpenQfResults()
+endfunction
+
+command! -nargs=0 -bang Repos call <SID>ShowWorkspaces('<bang>')
 "}}}
 
 """"""""""""""""""""""""""""DEBUGGING"""""""""""""""""""""""""""" {{{
