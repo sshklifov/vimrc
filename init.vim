@@ -105,6 +105,9 @@ function! s:Join(a, b)
   endif
 endfunction
 
+" Open vimrc quick (muy importante)
+nnoremap <leader>ev :e ~/.config/nvim/init.vim<CR>
+
 cabbr Gd lefta Gdiffsplit
 cabbr Gl Gclog!
 cabbr Gb Git blame
@@ -816,8 +819,8 @@ function! s:FindInWorkspace(bang, pat)
   call s:FindInQuickfix(a:bang, ws, a:pat)
 endfunction
 
-command! -nargs=? -bang List call <SID>FindInQuickfix("<bang>", getcwd(), <q-args>, ['-maxdepth', 1])
-command! -nargs=? -bang Find call <SID>FindInQuickfix("<bang>", getcwd(), <q-args>)
+command! -nargs=0 -bang List call <SID>FindInQuickfix("<bang>", getcwd(), "", ['-maxdepth', 1])
+command! -nargs=1 -bang -complete=dir Find call <SID>FindInQuickfix("<bang>", <q-args>, "")
 command! -nargs=? -bang Workspace call <SID>FindInWorkspace("<bang>", <q-args>)
 
 function! s:Index(arg)
