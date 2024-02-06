@@ -188,6 +188,7 @@ function! s:OpenQfResults()
   endif
 endfunction
 
+" Works for find and grep family of commands where a lot of filtering is needed
 let g:exclude_dirs = ["ccls-cache", ".git", "Debug", "Release"]
 let g:exclude_files = ["compile_commands.json", ".ccls"]
 
