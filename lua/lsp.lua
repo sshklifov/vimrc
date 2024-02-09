@@ -162,21 +162,6 @@ function GetCachePath()
   return "/home/" .. os.getenv("USER") ..  "/ccls-cache"
 end
 
-lspconfig.ccls.setup {
-  init_options = {
-    cache = {
-      directory = GetCachePath(),
-      hierarchicalPath = true
-    },
-    highlight = {
-      lsRanges = true
-    },
-  },
+lspconfig.clangd.setup {
   on_attach = OnAttach,
-  flags = {
-    debounce_text_changes = 150
-  },
-
-  -- Uncomment for debug log
-  -- cmd = { "/usr/bin/ccls", "-log-file=/tmp/ccls.log", "-v=1"}
 }

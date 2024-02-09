@@ -13,7 +13,6 @@ Plug 'catppuccin/nvim', { 'as': 'catppuccin' }
 
 Plug 'tpope/vim-fugitive'
 Plug 'neovim/nvim-lspconfig'
-Plug 'jackguo380/vim-lsp-cxx-highlight'
 Plug 'sshklifov/debug'
 
 call plug#end()
@@ -138,7 +137,7 @@ set cc=101
 set ignorecase
 set smartcase
 set hlsearch
-nnoremap <silent> <Space> :nohlsearch <bar> LspCxxHighlight<cr>
+nnoremap <silent> <Space> :nohlsearch <cr>
 
 " Typos
 command! -bang Q q<bang>
@@ -1052,11 +1051,13 @@ command! -range=% For lua vim.lsp.buf.format{ range = {start= {<line1>, 0}, ["en
 highlight LspReferenceText gui=underline
 highlight! link LspReferenceRead LspReferenceText
 highlight! link LspReferenceWrite LspReferenceText
-lua vim.highlight.priorities.user = 9999
 
 " Class highlight
-highlight LspCxxHlGroupMemberVariable guifg=LightGray
-highlight! link LspCxxHlGroupNamespace LspCxxHlSymClass
+highlight! link @lsp.type.class.cpp @lsp.type.type
+highlight! link @lsp.type.parameter.cpp @lsp.type.variable
+highlight! link @lsp.typemod.method.defaultLibrary Function
+highlight! link @lsp.typemod.function.defaultLibrary Function
+highlight! @lsp.type.property  guifg=LightGray
 
 lua require('lsp')
 
