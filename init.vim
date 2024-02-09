@@ -107,6 +107,7 @@ endfunction
 
 " Open vimrc quick (muy importante)
 nnoremap <leader>ev :e ~/.config/nvim/init.vim<CR>
+nnoremap <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
 
 cabbr Gd lefta Gdiffsplit
 cabbr Gl Gclog!
@@ -189,7 +190,7 @@ function! s:OpenQfResults()
 endfunction
 
 " Works for find and grep family of commands where a lot of filtering is needed
-let g:exclude_dirs = ["ccls-cache", ".git", "Debug", "Release"]
+let g:exclude_dirs = ["ccls-cache", ".git", "Debug", "Release", "build"]
 let g:exclude_files = ["compile_commands.json", ".ccls"]
 
 function! s:ExcludeFile(file)
@@ -870,7 +871,7 @@ function! s:ShowWorkspaces(bang)
   call s:OpenQfResults()
 endfunction
 
-command! -nargs=0 -bang Repos call <SID>ShowWorkspaces('<bang>')
+command! -nargs=0 Repos call <SID>ShowWorkspaces('!')
 "}}}
 
 """"""""""""""""""""""""""""DEBUGGING"""""""""""""""""""""""""""" {{{
