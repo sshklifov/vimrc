@@ -897,9 +897,28 @@ function! ExeCompl(ArgLead, CmdLine, CursorPos)
   return split(system(cmd), nr2char(10))
 endfunction
 
+command! -nargs=1 -complete=customlist,AttachCompl Attach call s:Debug({"proc": <q-args>})
+
+function! AttachCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+
+  let cmdlines = split(system(["ps", "h", "-U", $USER, "-o", "command"]), nr2char(10))
+  let compl = []
+  for cmdline in cmdlines
+    let name = split(cmdline, " ")[0]
+    if executable(name) && stridx(name, a:ArgLead) >= 0
+      call add(compl, name)
+    endif
+  endfor
+  let compl = uniq(sort(compl))
+  return compl
+endfunction
+
 " Available modes:
 " - exe. Pass executable + arguments
-" - pname. Process name to attach. Will be resolved to a pid.
+" - proc. Process name or pid to attach.
 " Other arguments:
 " - symbols. Whether to load symbols or not. Used for faster loading of gdb.
 " - ssh. Launch GDB over ssh with the given address.
@@ -908,6 +927,22 @@ function! s:Debug(args)
   if TermDebugIsOpen()
     echoerr 'Terminal debugger already running, cannot run two'
     return
+  endif
+
+  " Resolve process name early
+  let proc = get(a:args, "proc", "")
+  if proc !~ "^[0-9]*$"
+    let pids = split(system(["pgrep", "-f", proc]), nr2char(10))
+    " Report error
+    if len(pids) == 0
+      echo "No processes found"
+      return
+    elseif len(pids) > 1
+      echo "Multiple processes found"
+      return
+    endif
+    " Resolve to pid
+    let a:args["proc"] = pids[0]
   endif
 
   autocmd User TermdebugStopPre call s:DebugStopPre()
@@ -945,12 +980,8 @@ function! s:DebugStartPost(args)
     call TermDebugSendCommand("set auto-solib-add off")
   endif
   
-  if has_key(a:args, "pname")
-    let pname = a:args["pname"]
-    let pid = s:GetProcessID(pname, get(a:args, 'ssh', ''))
-    if pid >= 0
-      call TermDebugSendCommand("attach " . pid)
-    endif
+  if has_key(a:args, "proc")
+    call TermDebugSendCommand("attach " . a:args["proc"])
   elseif has_key(a:args, "exe")
     let cmdArgs = split(a:args["exe"], " ")
     call TermDebugSendCommand("file " . cmdArgs[0])
