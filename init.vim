@@ -1057,7 +1057,6 @@ highlight! link @lsp.type.class.cpp @lsp.type.type
 highlight! link @lsp.type.parameter.cpp @lsp.type.variable
 highlight! link @lsp.typemod.method.defaultLibrary Function
 highlight! link @lsp.typemod.function.defaultLibrary Function
-highlight! @lsp.type.property  guifg=LightGray
 
 lua require('lsp')
 
