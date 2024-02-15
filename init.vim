@@ -13,11 +13,16 @@ Plug 'catppuccin/nvim', { 'as': 'catppuccin' }
 
 Plug 'tpope/vim-fugitive'
 Plug 'neovim/nvim-lspconfig'
+
 Plug 'sshklifov/debug'
+Plug 'sshklifov/qsearch'
+Plug 'sshklifov/qutil'
 
 call plug#end()
 
 packadd cfilter
+
+" TODO :Index
 
 """"""""""""""""""""""""""""Plugin settings"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -35,6 +40,10 @@ let g:netrw_banner = 0
 
 " sshklifov/debug
 let g:termdebug_capture_msgs = 1
+
+" sshklifov/qsearch
+let g:qsearch_exclude_dirs = [".cache", ".git", "Debug", "Release"]
+let g:qsearch_exclude_files = ["compile_commands.json"]
 
 " tpope/vim-eunuch
 function! s:Move(arg)
@@ -172,260 +181,6 @@ set shell=/bin/bash
 
 " Display better the currently selected entry in quickfix
 autocmd FileType qf setlocal cursorline
-" }}}
-
-""""""""""""""""""""""""""""Quickfix"""""""""""""""""""""""""""" {{{
-""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-function! s:OpenQfResults()
-  let len = getqflist({"size": 1})['size']
-  if len == 0
-    echo "No results"
-  elseif len == 1
-    cc
-  else
-    copen
-  endif
-endfunction
-
-" Works for find and grep family of commands where a lot of filtering is needed
-let g:exclude_dirs = ["ccls-cache", ".git", "Debug", "Release", "build"]
-let g:exclude_files = ["compile_commands.json", ".ccls"]
-
-function! s:ExcludeFile(file)
-  for dir in g:exclude_dirs
-    if stridx(a:file, dir) >= 0
-      return v:true
-    endif
-  endfor
-  for file in g:exclude_files
-    if a:file[-len(file):-1] == file
-      return v:true
-    endif
-  endfor
-  return v:false
-endfunction
-
-function! s:OldFiles(read_shada)
-  if a:read_shada
-    rsh!
-  endif
-
-  let items = deepcopy(v:oldfiles)
-  let items = map(items, {_, f -> {"filename": f, "lnum": 1, 'text': fnamemodify(f, ":t")}})
-  call setqflist([], ' ', {'title': 'Oldfiles', 'items': items})
-  call s:OpenQfResults()
-endfunction
-
-command -nargs=0 -bang Old call s:OldFiles(<bang>0)
-
-function! s:Grep(regex, where)
-  call setqflist([], ' ', {'title' : 'Grep', 'items' : []})
-
-  function! OnEvent(id, data, event)
-    function! GetGrepItem(index, match)
-      let sp = split(a:match, ":")
-      if len(sp) < 3
-        return {}
-      endif
-      if !filereadable(sp[0]) || s:ExcludeFile(sp[0])
-        return {}
-      endif
-      if sp[1] !~ '^[0-9]\+$'
-        return {}
-      endif
-      return {"filename": sp[0], "lnum": sp[1], 'text': join(sp[2:-1], ":")}
-    endfunction
-    let items = filter(map(a:data, function("GetGrepItem")), "!empty(v:val)")
-    call setqflist([], 'a', {'items' : items})
-  endfunction
-
-  let cmd = ['grep']
-  " Apply 'smartcase' to the regex
-  if a:regex !~# "[A-Z]"
-    let cmd = cmd + ['-i']
-  endif
-  let cmd = cmd + ['-I', '-H', '-n', a:regex]
-
-  if type(a:where) == v:t_list
-    let cmd = ['xargs'] + cmd
-    let id = jobstart(cmd, {'on_stdout': function('OnEvent') } )
-    call chansend(id, a:where)
-  else
-    let cmd = cmd + ['-R', a:where]
-    let id = jobstart(cmd, {'on_stdout': function('OnEvent') } )
-  endif
-
-  call chanclose(id, 'stdin')
-  call jobwait([id]) " Need to know length of items
-  call s:OpenQfResults()
-endfunction
-
-function! s:GrepQuickfixFiles(regex)
-  let files = map(getqflist(), 'expand("#" . v:val["bufnr"] . ":p")')
-  let files = uniq(sort(files))
-  call s:Grep(a:regex, files)
-endfunction
-
-" Current buffer
-command! -nargs=1 Bgrep call <SID>Grep(<q-args>, [expand("%:p")])
-" All files in quickfix
-command! -nargs=1 Cgrep call <SID>GrepQuickfixFiles(<q-args>)
-" Current path
-command! -nargs=1 Rgrep call <SID>Grep(<q-args>, getcwd())
-
-function! s:DeleteQfEntries(a, b)
-  let qflist = filter(getqflist(), {i, _ -> i+1 < a:a || i+1 > a:b})
-  call setqflist([], ' ', {'title': 'Cdelete', 'items': qflist})
-endfunction
-
-autocmd FileType qf command! -buffer -range Cdelete call <SID>DeleteQfEntries(<line1>, <line2>)
-
-function! s:OpenJumpList()
-  let jl = deepcopy(getjumplist())
-  let entries = jl[0]
-  let idx = jl[1]
-
-  for i in range(len(entries))
-    if !bufloaded(entries[i]['bufnr'])
-      let entries[i] = #{text: "Not loaded"}
-    else
-      let lines = getbufline(entries[i]['bufnr'], entries[i]['lnum'])
-      if len(lines) > 0
-        let entries[i]['text'] = lines[0]
-      endif
-    endif
-  endfor
-
-  call setqflist([], 'r', {'title': 'Jump', 'items': entries})
-  " Open quickfix at the relevant position
-  if idx < len(entries)
-    exe "keepjumps crewind " . (idx + 1)
-  endif
-  " Keep the same window focused
-  let nr = winnr()
-  keepjumps copen
-  exec "keepjumps " . nr . "wincmd w"
-endfunction
-
-function! s:Jump(scope)
-  if s:IsBufferQf()
-    if a:scope == "i"
-      try
-        silent cnew
-      catch
-        echo "Hit newest list"
-      endtry
-    elseif a:scope == "o"
-      try
-        silent cold
-      catch
-        echo "Hit oldest list"
-      endtry
-    endif
-    return
-  endif
-
-  " Pass 1 to normal so vim doesn't interpret ^i as a TAB (they use the same keycode of 9)
-  if a:scope == "i"
-    exe "normal! 1" . "\<c-i>"
-  elseif a:scope == "o"
-    exe "normal! 1" . "\<c-o>"
-  endif
-
-  " Refresh jump list
-  if s:IsQfOpen()
-    let title = getqflist({'title': 1})['title']
-    if title == "Jump"
-      call s:OpenJumpList()
-    endif
-  endif
-endfunction
-
-nnoremap <silent> <leader>ju :call <SID>OpenJumpList()<CR>
-nnoremap <silent> <c-i> :call <SID>Jump("i")<CR>
-nnoremap <silent> <c-o> :call <SID>Jump("o")<CR>
-
-function! s:ShowBuffers(pat)
-  let pat = ".*" . a:pat . ".*"
-  if a:pat !~# "[A-Z]"
-    let pat = '\c' . pat
-  else
-    let pat = '\C' . pat
-  endif
-
-  function! s:GetBufferItem(_, n) closure
-    let name = expand('#' . a:n . ':p')
-    if !filereadable(name) || match(name, pat) < 0
-      return {}
-    endif
-
-    let bufinfo = getbufinfo(a:n)[0]
-    let text = "" . a:n
-    if bufinfo["changed"]
-      let text = text . " (modified)"
-    endif
-    return {"bufnr": a:n, "text": text, "lnum": bufinfo["lnum"]}
-  endfunction
-
-  let items = map(range(1, bufnr('$')), function("s:GetBufferItem"))
-  let items = filter(items, "!empty(v:val)")
-  call setqflist([], 'r', {'title' : 'Buffers', 'items' : items})
-  call s:OpenQfResults()
-endfunction
-
-nnoremap <silent> <leader>buf :call <SID>ShowBuffers("")<CR>
-
-function! BufferCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-
-  let pat = ".*" . a:ArgLead . ".*"
-  if pat !~# "[A-Z]"
-    let pat = '\c' . pat
-  else
-    let pat = '\C' . pat
-  endif
-
-  let names = map(range(1, bufnr('$')), "bufname(v:val)")
-  let names = filter(names, "filereadable(v:val)")
-  let compl = []
-  for name in names
-    let parts = split(name, "/")
-    for part in parts
-      if match(part, pat) >= 0
-        call add(compl, part)
-      endif
-    endfor
-  endfor
-  return uniq(sort(compl))
-endfunction
-
-command! -nargs=? -complete=customlist,BufferCompl Buffer call <SID>ShowBuffers(<q-args>)
-
-function! s:IsBufferQf()
-  let tabnr = tabpagenr()
-  let bufnr = bufnr()
-  let wins = filter(getwininfo(), {_, w -> w['tabnr'] == tabnr && w['quickfix'] == 1 && w['bufnr'] == bufnr})
-  return !empty(wins)
-endfunction
-
-function! s:IsQfOpen()
-  let tabnr = tabpagenr()
-  let wins = filter(getwininfo(), {_, w -> w['tabnr'] == tabnr && w['quickfix'] == 1 && w['loclist'] == 0})
-  return !empty(wins)
-endfunction
-
-function! s:ToggleQf()
-  if s:IsQfOpen()
-    cclose
-  else
-    copen
-  endif
-endfunction
-
-nnoremap <silent> <leader>cc :call <SID>ToggleQf()<CR>
 " }}}
 
 """"""""""""""""""""""""""""Appearance"""""""""""""""""""""""""""" {{{
@@ -705,9 +460,8 @@ function! s:OpenSource()
     endif
   endfor
 
-  "Default to using FindInWorkspace
-  let nobang = ""
-  call s:FindInWorkspace(nobang, expand("%:t:r") . ".c")
+  " Default to search in root of workspace
+  call FindInQuickfix(FugitiveWorkTree(), expand("%:t:r") . ".c")
 endfunction
 
 function! s:OpenHeader()
@@ -726,9 +480,8 @@ function! s:OpenHeader()
     endif
   endfor
 
-  "Default to using FindInWorkspace
-  let nobang = ""
-  call s:FindInWorkspace(nobang, expand("%:t:r") . ".h")
+  " Default to search in root of workspace
+  call FindInQuickfix(FugitiveWorkTree(), expand("%:t:r") . ".h")
 endfunction
 
 nmap <silent> <leader>cpp :call <SID>OpenSource()<CR>
@@ -745,132 +498,6 @@ function! s:EditFugitive()
 endfunction
 
 nnoremap <silent> <leader>fug :call <SID>EditFugitive()<CR>
-
-function! s:Find(bang, dir, arglist, Cb)
-  if empty(a:dir)
-    return
-  endif
-
-  " Add exclude paths flags
-  let flags = []
-  " Bang means to force more results and not take into accound exclude paths.
-  if a:bang != "!"
-    for dir in g:exclude_dirs
-      let flags = flags + ["-path", "**/" . dir, "-prune", "-false", "-o"]
-    endfor
-    for file in g:exclude_files
-      let flags = flags + ["-not", "-name", file]
-    endfor
-  endif
-
-  " Exclude directorties from results
-  let flags = flags + ["-type", "f"]
-  " Add user flags
-  let flags = flags + a:arglist
-  " Add actions (ignore binary files)
-  let flags = flags + [
-        \ "-exec", "grep", "-Iq", ".", "{}", ";",
-        \ "-print"
-        \ ]
-
-  let cmd = ["find",  fnamemodify(a:dir, ':p')] + flags
-  let id = jobstart(cmd, {'on_stdout': a:Cb})
-  call chanclose(id, 'stdin')
-  return id
-endfunction
-
-function! s:FindInQuickfix(bang, dir, pat, ...)
-  function! PopulateQuickfix(id, data, event)
-    let files = filter(a:data, "filereadable(v:val)")
-    let items = map(files, {_, f -> {'filename': f, 'lnum': 1, 'col': 1, 'text': fnamemodify(f, ':t')} })
-    call setqflist([], 'a', {'items' : items})
-  endfunction
-
-  let flags = []
-  if !empty(a:pat)
-    let regex = ".*" . a:pat . ".*"
-    " Apply 'smartcase' to the regex
-    if regex =~# "[A-Z]"
-      let flags = ["-regex", regex]
-    else
-      let flags = ["-iregex", regex]
-    endif
-  endif
-  " Add user args
-  let flags += get(a:, 1, [])
-
-  " Perform find operation
-  call setqflist([], ' ', {'title' : 'Find', 'items' : []})
-  let id = s:Find(a:bang, a:dir, flags, function("PopulateQuickfix"))
-
-  call jobwait([id]) " Need to know length of items
-  call s:OpenQfResults()
-endfunction
-
-function! s:GetWorkspace()
-  return FugitiveWorkTree()
-endfunction
-
-function! s:FindInWorkspace(bang, pat)
-  let ws = s:GetWorkspace()
-  if empty(ws)
-    echo "Not in workspace"
-    return
-  endif
-  call s:FindInQuickfix(a:bang, ws, a:pat)
-endfunction
-
-command! -nargs=0 -bang List call <SID>FindInQuickfix("<bang>", getcwd(), "", ['-maxdepth', 1])
-command! -nargs=1 -bang -complete=dir Find call <SID>FindInQuickfix("<bang>", <q-args>, "")
-command! -nargs=? -bang Workspace call <SID>FindInWorkspace("<bang>", <q-args>)
-
-function! s:Index(arg)
-  let ws = s:GetWorkspace()
-  if ws == ""
-    echo "Not in workspace"
-    return
-  endif
-  let cache = luaeval("GetCachePath()")
-  let hierarchy = s:Join(cache, ws[1:])
-  if !isdirectory(hierarchy)
-    echo "No cache found"
-    return
-  endif
-
-  let pat = ".*" . a:arg . ".*blob"
-  " Apply 'smartcase' to the regex
-  if pat =~# "[A-Z]"
-    let regex = "-regex"
-  else
-    let regex = "-iregex"
-  endif
-
-  let res = system(["find", hierarchy, "-type", "f", regex, pat, "-printf", "%P\n"])
-  let res = split(res, nr2char(10))
-  let res = map(res, {_, v -> s:Join(ws, v[0:-6])})
-  let items = map(res, "#{filename: v:val, lnum: 1, text: fnamemodify(v:val, ':t')}")
-  call setqflist([], ' ', #{title: "Index", items: items})
-  call s:OpenQfResults()
-endfunction
-
-command! -nargs=? Index call <SID>Index(<q-args>)
-
-function! s:ShowWorkspaces(bang)
-  if !empty(a:bang)
-    let names = deepcopy(v:oldfiles)
-  else
-    let names = map(range(1, bufnr('$')), "bufname(v:val)")
-    let names = filter(names, "filereadable(v:val)")
-  endif
-  let git = filter(map(names, "FugitiveExtractGitDir(v:val)"), "!empty(v:val)")
-  let git = uniq(sort(git))
-  let repos = map(git, "fnamemodify(v:val, ':h')")
-  let items = map(repos, {_, f -> {"filename": f, "lnum": 1, 'text': fnamemodify(f, ":t")}})
-  call setqflist([], ' ', {'title': 'Git', 'items': items})
-  call s:OpenQfResults()
-endfunction
-
-command! -nargs=0 Repos call <SID>ShowWorkspaces('!')
 "}}}
 
 """"""""""""""""""""""""""""DEBUGGING"""""""""""""""""""""""""""" {{{
