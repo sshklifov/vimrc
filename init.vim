@@ -42,7 +42,7 @@ let g:netrw_banner = 0
 let g:termdebug_capture_msgs = 1
 
 " sshklifov/qsearch
-let g:qsearch_exclude_dirs = [".cache", ".git", "Debug", "Release"]
+let g:qsearch_exclude_dirs = [".cache", ".git", "Debug", "Release", "build"]
 let g:qsearch_exclude_files = ["compile_commands.json"]
 
 " tpope/vim-eunuch
@@ -689,4 +689,56 @@ lua require('lsp')
 
 autocmd User LspProgressUpdate redrawstatus
 autocmd User LspRequest redrawstatus
+
+function! s:Index()
+  let dir = s:Join(FugitiveWorkTree(), ".cache/clangd/index")
+  if isdirectory(dir)
+    let indexFiles = split(system(["find", dir, "-printf", "%P\n"]), nr2char(10))
+    let indexFiles = map(indexFiles, 'join(split(v:val, "[.]")[:-3], ".")')
+
+    let s:fileMap = #{}
+    function! CollectFiles(id, data, event)
+      let files = filter(a:data, "filereadable(v:val)")
+      for file in files
+        let parts = split(file, "/")
+        let basename = parts[-1]
+        let dirname = join(parts[:-2], "/")
+        let s:fileMap[basename] = dirname
+      endfor
+    endfunction
+
+    let id = Find(FugitiveWorkTree(), [], function("CollectFiles"))
+    call jobwait([id])
+
+    let qlist = []
+    let miss = v:false
+    for indexFile in indexFiles
+      if has_key(s:fileMap, indexFile)
+        let dir = s:fileMap[indexFile]
+        call add(qlist, {'filename': s:Join(dir, indexFile), 'lnum': 1, 'col': 1, 'text': indexFile})
+      else
+        let miss = v:true
+      endif
+    endfor
+
+    unlet s:fileMap
+    call setqflist([], ' ', {'title': 'Index', 'items' : qlist})
+    copen
+
+    if miss
+      echom "Result list not complete"
+    endif
+  endif
+endfunction
+
+function! Test(arg)
+  function Inner() closure
+    echom a:arg
+  endfunction
+  call Inner()
+endfunction
+
+
+
+command! -nargs=0 Index call <SID>Index()
 "}}}
