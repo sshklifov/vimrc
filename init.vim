@@ -351,6 +351,7 @@ xnoremap <silent> <leader>P :<C-W>set
 command! -bar Retab set invexpandtab | retab!
 
 function! s:ToggleDiff()
+  cclose " TODO patch
   let winids = gettabinfo(tabpagenr())[0]["windows"]
   let fugitive_winids = []
   let diff_winids = []
@@ -401,6 +402,38 @@ inoremap <silent> <C-Space> <C-X><C-O>
 inoremap {<CR> {<CR>}<C-o>O
 
 nmap <leader>sp :setlocal invspell<CR>
+
+function! s:Review()
+  let dict = FugitiveExecute(["log", "origin/main..HEAD", "--pretty=format:%H"])
+  if dict['exit_status'] != 0
+    echo "Review failed, have you checked out the branch?"
+    return
+  endif
+
+  let commit = dict['stdout'][-1]
+  let dict = FugitiveExecute(["log", "--format=%B", "-n", "1", commit])
+  if dict['exit_status'] == 0
+    let message = dict['stdout'][0]
+    if message !~# ".*SW-[0-9][0-9][0-9][0-9].*"
+      let dict = FugitiveExecute(["rev-parse", commit . "~1"])
+      if dict['exit_status'] == 0
+        let bpoint = dict['stdout'][0]
+      endif
+    endif
+  endif
+  if !exists('bpoint')
+    echo "Could not determine branch point, have you fetched main?"
+    return
+  endif
+
+  exe "Git difftool --name-only " . bpoint
+  let bufs = map(getqflist(), "v:val.bufnr")
+  for b in bufs
+    call setbufvar(b, "commitish", bpoint)
+  endfor
+endfunction
+
+command! -nargs=0 Review call <SID>Review()
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
