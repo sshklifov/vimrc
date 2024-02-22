@@ -427,6 +427,7 @@ function! s:Review()
   endif
 
   exe "Git difftool --name-only " . bpoint
+  call setqflist([], 'a', #{title: "Review"})
   let bufs = map(getqflist(), "v:val.bufnr")
   for b in bufs
     call setbufvar(b, "commitish", bpoint)
@@ -434,6 +435,8 @@ function! s:Review()
 endfunction
 
 command! -nargs=0 Review call <SID>Review()
+
+command! -nargs=0 Complete call setqflist(filter(getqflist(), "v:val.bufnr != " . bufnr("%")))
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
