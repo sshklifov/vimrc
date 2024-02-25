@@ -6,7 +6,6 @@ Plug 'tpope/vim-sensible'
 Plug 'tpope/vim-commentary'
 Plug 'tpope/vim-endwise'
 Plug 'tpope/vim-surround'
-Plug 'tpope/vim-repeat'
 
 Plug 'webdevel/tabulous'
 Plug 'catppuccin/nvim', { 'as': 'catppuccin' }
@@ -51,7 +50,7 @@ function! s:Move(arg)
   endif
 
   let oldname = expand("%:p")
-  let newname = s:Join(a:arg, expand("%:t"))
+  let newname = a:arg . "/" . expand("%:t")
   
   let lua_str = 'lua vim.lsp.util.rename("' . oldname . '", "' . newname . '")'
   exe lua_str
@@ -68,7 +67,7 @@ function! s:Rename(arg)
   let oldname = expand("%:p")
   if stridx(a:arg, "/") < 0
     let dirname = expand("%:p:h")
-    let newname = s:Join(dirname, a:arg)
+    let newname = dirname . "/" . a:arg
   else
     let newname = a:arg
   endif
@@ -103,13 +102,6 @@ set diffopt+=vertical
 
 """"""""""""""""""""""""""""Everything else"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-function! s:Join(a, b)
-  if a:a[-1:-1] == '/'
-    return a:a . a:b
-  else
-    return a:a . '/' . a:b
-  endif
-endfunction
 
 " Open vimrc quick (muy importante)
 nnoremap <leader>ev :e ~/.config/nvim/init.vim<CR>
