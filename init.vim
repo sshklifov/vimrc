@@ -525,9 +525,6 @@ nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
 command! -nargs=? -complete=customlist,ExeCompl Start call s:Debug({"exe": empty(<q-args>) ? "a.out" : <q-args>})
 command! -nargs=? -complete=customlist,ExeCompl Run call s:Debug({"exe": empty(<q-args>) ? "a.out" : <q-args>, "br": <SID>GetDebugLoc()})
 
-" TODO
-command! -nargs=0 Remote call s:Debug({"exe": "/home/root/Debug/application/capture-video", "ssh": "root@10.1.20.26"})
-
 function! ExeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
@@ -544,6 +541,20 @@ function! ExeCompl(ArgLead, CmdLine, CursorPos)
   let cmd = ["find", ".", '(', "-path", "**/.git", "-prune", "-false", "-o", regex, pat, ')']
   let cmd += ["-type", "f", "-executable", "-printf", "%P\n"]
   return split(system(cmd), nr2char(10))
+endfunction
+
+command! -nargs=1 -complete=customlist,RemoteCompl Remote26 call s:Debug({"exe": <q-args>, "ssh": "root@10.1.20.26"})
+
+function! RemoteCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+
+  " No 'iregex' on remote device
+  let pat = ".*" . a:ArgLead . ".*"
+  let find = "find /home/root/Debug -regex '" . pat . "' -type f -executable"
+  let machine = "root@10.1.20." . a:CmdLine[6] . a:CmdLine[7]
+  return split(system(["ssh", "-o", "ConnectTimeout=1", machine, find]), nr2char(10))
 endfunction
 
 command! -nargs=1 -complete=customlist,AttachCompl Attach call s:Debug({"proc": <q-args>})
