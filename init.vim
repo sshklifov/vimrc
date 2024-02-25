@@ -12,6 +12,7 @@ Plug 'catppuccin/nvim', { 'as': 'catppuccin' }
 
 Plug 'tpope/vim-fugitive'
 Plug 'neovim/nvim-lspconfig'
+Plug 'tpope/vim-sleuth'
 
 Plug 'sshklifov/debug'
 Plug 'sshklifov/qsearch'
@@ -120,7 +121,7 @@ autocmd FileType gitcommit set tw=90
 " Capture <Esc> in termal mode
 tnoremap <Esc> <C-\><C-n>
 
-" Indentation settings
+" Indentation settings (will be overriden by vim-sleuth)
 set expandtab
 set shiftwidth=4
 set tabstop=4
