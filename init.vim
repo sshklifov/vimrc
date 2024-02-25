@@ -500,6 +500,13 @@ function! s:EditFugitive()
 endfunction
 
 nnoremap <silent> <leader>fug :call <SID>EditFugitive()<CR>
+
+function! s:Context(reverse)
+  call search('^\(@@ .* @@\|[<=>|]\{7}[<=>|]\@!\)', a:reverse ? 'bW' : 'W')
+endfunction
+
+nnoremap <silent> [n :call <SID>Context(v:true)
+nnoremap <silent> ]n :call <SID>Context(v:false)
 "}}}
 
 """"""""""""""""""""""""""""DEBUGGING"""""""""""""""""""""""""""" {{{
