@@ -320,7 +320,7 @@ command! -nargs=0 CursorSym call <SID>SynStack()
 
 nnoremap <leader><leader>q :mksession! ~/.local/share/nvim/session.vim<CR>
 nnoremap <leader>so :so ~/.local/share/nvim/session.vim<CR>
-set sessionoptions=buffers,curdir,folds,help,localoptions,options,tabpages,winsize
+set sessionoptions=buffers,curdir,help,localoptions,options,tabpages,winsize
 
 nnoremap <silent> <leader>cd :lcd %:p:h<CR>
 nnoremap <silent> <leader>gcd :Gcd<CR>
@@ -433,7 +433,24 @@ endfunction
 
 command! -nargs=0 Review call <SID>Review()
 
-command! -nargs=0 Complete call setqflist(filter(getqflist(), "v:val.bufnr != " . bufnr("%")))
+function! s:ReviewCompleteFiles(cmdBang, files)
+  " Invert bang
+  let bang = a:cmdBang == "!" ? "" : "!"
+  " Rewind to Review quickfix
+  while getqflist(#{title: 0})['title'] != "Review"
+    cold
+  endwhile
+
+  if len(a:files) > 0
+    exe "Cfilter" . bang . " " . a:files
+  else
+    call setqflist(filter(getqflist(), "v:val.bufnr " . bang . "= " . bufnr("%")))
+  endif
+  call setqflist([], 'a', #{title: "Review"})
+  copen
+endfunction
+
+command! -bang -nargs=? Complete  call <SID>ReviewCompleteFiles('<bang>', <q-args>)
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
@@ -515,6 +532,8 @@ nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
 
 command! -nargs=? -complete=customlist,ExeCompl Start call s:Debug({"exe": empty(<q-args>) ? "a.out" : <q-args>})
 command! -nargs=? -complete=customlist,ExeCompl Run call s:Debug({"exe": empty(<q-args>) ? "a.out" : <q-args>, "br": <SID>GetDebugLoc()})
+
+command! -nargs=0 Remote call s:Debug({"exe": "/home/root/Debug/application/capture-video", "ssh": "root@10.1.20.26"})
 
 function! ExeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
