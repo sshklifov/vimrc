@@ -546,8 +546,8 @@ function! s:Context(reverse)
   call search('^\(@@ .* @@\|[<=>|]\{7}[<=>|]\@!\)', a:reverse ? 'bW' : 'W')
 endfunction
 
-nnoremap <silent> [n :call <SID>Context(v:true)
-nnoremap <silent> ]n :call <SID>Context(v:false)
+nnoremap <silent> [n :call <SID>Context(v:true)<CR>
+nnoremap <silent> ]n :call <SID>Context(v:false)<CR>
 "}}}
 
 """"""""""""""""""""""""""""DEBUGGING"""""""""""""""""""""""""""" {{{
