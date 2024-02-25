@@ -491,6 +491,23 @@ function! s:EditFugitive()
 endfunction
 
 nnoremap <silent> <leader>fug :call <SID>EditFugitive()<CR>
+
+function! s:ResolveEnvFile()
+  let fname = expand("%:f")
+  let idx = stridx(fname, "include/alcatraz")
+  if idx >= 0
+    let resolved = "/home/stef/libalcatraz/" . fname[idx:]
+    if filereadable(resolved)
+      exe "edit " . resolved
+    else
+      echo "Sorry, I'm buggy, Update me!"
+    endif
+  else
+    echo "Sorry, no idea. Update me!"
+  endif
+endfunction
+
+nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
 "}}}
 
 """"""""""""""""""""""""""""DEBUGGING"""""""""""""""""""""""""""" {{{
