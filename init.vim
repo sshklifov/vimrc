@@ -525,6 +525,7 @@ nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
 command! -nargs=? -complete=customlist,ExeCompl Start call s:Debug({"exe": empty(<q-args>) ? "a.out" : <q-args>})
 command! -nargs=? -complete=customlist,ExeCompl Run call s:Debug({"exe": empty(<q-args>) ? "a.out" : <q-args>, "br": <SID>GetDebugLoc()})
 
+" TODO
 command! -nargs=0 Remote call s:Debug({"exe": "/home/root/Debug/application/capture-video", "ssh": "root@10.1.20.26"})
 
 function! ExeCompl(ArgLead, CmdLine, CursorPos)
@@ -768,7 +769,7 @@ function! AstHandler(buf, kinds, res)
       if index(a:kinds, head.kind) >= 0
         let lnum = head.range.start.line + 1
         let col = head.range.start.character + 1
-        let text = getbufoneline(a:buf, lnum)[col-1:]
+        let text = readfile(bufname(a:buf))[lnum-1][col-1:]
         call add(items, #{bufnr: a:buf, lnum: lnum, col: col, text: text})
       endif
       if has_key(head, 'children')
@@ -840,11 +841,10 @@ function! s:Instances()
   for ref in resp
     if stridx(ref.containerName, excludeContainer) < 0
       let fname = v:lua.vim.uri_to_fname(ref.uri)
-      let buf = bufnr(fname, v:true)
       let lnum = ref.range.start.line + 1
       let col = ref.range.start.character + 1
-      call bufload(buf)
-      call add(items, #{filename: fname, lnum: lnum, col: col, text: getbufoneline(buf, lnum)[col-1:]})
+      let text = readfile(fname)[lnum-1][col-1:]
+      call add(items, #{filename: fname, lnum: lnum, col: col, text: text})
     endif
   endfor
   if empty(items)
@@ -913,7 +913,6 @@ function! s:Member(filterList)
 
   if kind != "CXXRecord"
     let bufnr = v:lua.vim.uri_to_bufnr(uri)
-    call bufload(bufnr)
     let params = #{position: range.start, textDocument: #{uri: uri}}
     let resp = s:LspRequestSync(bufnr, 'textDocument/symbolInfo', params)
     if empty(resp) || !has_key(resp[0], "declarationRange")
@@ -922,12 +921,12 @@ function! s:Member(filterList)
     endif
     let uri = resp[0].declarationRange.uri
     let range = resp[0].declarationRange.range
-    let rol = "CXXRecord"
   endif
+
+  unlet kind " CXXRecord
 
   let params = #{textDocument: #{uri: uri}, range: range}
   let bufnr = v:lua.vim.uri_to_bufnr(uri)
-  call bufload(bufnr)
   let resp = s:LspRequestSync(bufnr, 'textDocument/ast', params)
   if empty(resp)
     echo "Failed to load AST of class"
