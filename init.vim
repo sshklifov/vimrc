@@ -487,8 +487,48 @@ nnoremap ]b ]}
 nnoremap [z zo[z
 nnoremap ]z zo]z
 
-nmap <silent> <leader>cpp :Switch<CR>
-nmap <silent> <leader>hpp :Switch<CR>
+function! s:OpenSource()
+  let extensions = [".cpp", ".c", ".cc"]
+  for ext in extensions
+    let file = expand("%:r") . ext
+    if filereadable(file)
+      exe "edit " . file
+      return
+    endif
+
+    let file = substitute(file, "include", "src", "")
+    if filereadable(file)
+      exe "edit " . file
+      return
+    endif
+  endfor
+
+  " Default to search in root of workspace
+  call FindInQuickfix(FugitiveWorkTree(), expand("%:t:r") . ".c")
+endfunction
+
+function! s:OpenHeader()
+  let extensions = [".h", ".hpp", ".hh"]
+  for ext in extensions
+    let file = expand("%:r") . ext
+    if filereadable(file)
+      exe "edit " . file
+      return
+    endif
+
+    let file = substitute(file, "src", "include", "")
+    if filereadable(file)
+      exe "edit " . file
+      return
+    endif
+  endfor
+
+  " Default to search in root of workspace
+  call FindInQuickfix(FugitiveWorkTree(), expand("%:t:r") . ".h")
+endfunction
+
+nmap <silent> <leader>cpp :call <SID>OpenSource()<CR>
+nmap <silent> <leader>hpp :call <SID>OpenHeader()<CR>
 
 function! s:EditFugitive()
   let actual = bufname()
