@@ -22,8 +22,6 @@ call plug#end()
 
 packadd cfilter
 
-" TODO :Index
-
 """"""""""""""""""""""""""""Plugin settings"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -154,7 +152,6 @@ command! -bang W w<bang>
 command! -bang Qa qa<bang>
 
 " Annoying quirks
-set sessionoptions-=blank
 set shortmess+=I
 au FileType * setlocal fo-=cro
 nnoremap <C-w>t <C-w>T
@@ -727,35 +724,16 @@ autocmd User LspProgressUpdate redrawstatus
 autocmd User LspRequest redrawstatus
 
 function! s:Index()
-  let dir = s:Join(FugitiveWorkTree(), ".cache/clangd/index")
-  if isdirectory(dir)
-    let indexFiles = split(system(["find", dir, "-printf", "%P\n"]), nr2char(10))
-    let indexFiles = map(indexFiles, 'join(split(v:val, "[.]")[:-3], ".")')
+  let source = ["c", "cc", "cp", "cxx", "cpp", "CPP", "c++", "C"]
+  let header = ["h", "hh", "H", "hp", "hxx", "hpp", "HPP", "h++", "tcc"]
+  let regex = '.*\.\(' . join(source, '\|') . '\|' . join(header, '\|') . '\)'
+  let files = split(system(["find", FugitiveWorkTree(), "-regex", regex]), nr2char(10))
+  let items = map(files, "#{lnum: 1, col: 1, filename: v:val}")
+  call setqflist([], ' ', #{title: "Index", items: items})
+  copen
+endfunction
 
-    let s:fileMap = #{}
-    function! CollectFiles(id, data, event)
-      let files = filter(a:data, "filereadable(v:val)")
-      for file in files
-        let parts = split(file, "/")
-        let basename = parts[-1]
-        let dirname = join(parts[:-2], "/")
-        let s:fileMap[basename] = dirname
-      endfor
-    endfunction
-
-    let id = Find(FugitiveWorkTree(), [], function("CollectFiles"))
-    call jobwait([id])
-
-    let qlist = []
-    let miss = v:false
-    for indexFile in indexFiles
-      if has_key(s:fileMap, indexFile)
-        let dir = s:fileMap[indexFile]
-        call add(qlist, {'filename': s:Join(dir, indexFile), 'lnum': 1, 'col': 1, 'text': indexFile})
-      else
-        let miss = v:true
-      endif
-    endfor
+command! -nargs=0 Index call <SID>Index()
 
     unlet s:fileMap
     call setqflist([], ' ', {'title': 'Index', 'items' : qlist})
