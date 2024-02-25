@@ -426,7 +426,7 @@ endfunction
 
 command! -nargs=0 Review call <SID>Review()
 
-function! s:ReviewCompleteFiles(cmdBang, files)
+function! s:ReviewCompleteFiles(cmdBang, files) abort
   " Invert bang
   let bang = a:cmdBang == "!" ? "" : "!"
   " Rewind to Review quickfix
@@ -936,7 +936,9 @@ function! s:ResolveEnvFile()
   if idx >= 0
     let resolved = "/home/stef/libalcatraz/" . fname[idx:]
     if filereadable(resolved)
+      let pos = getcurpos()[1:]
       exe "edit " . resolved
+      call cursor(pos)
     else
       echo "Sorry, I'm buggy, Update me!"
     endif
