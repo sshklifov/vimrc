@@ -2,115 +2,62 @@
 
 local lspconfig = require('lspconfig')
 
--- ccls LSP extensions
-
-vim.lsp.handlers['$ccls/call'] = function(_, res, ctx, _)
-  if not res or vim.tbl_isempty(res) then
-    vim.notify('No methods found')
-  else
-    local client = vim.lsp.get_client_by_id(ctx.client_id)
-    vim.fn.setqflist({}, ' ', {
-      title = 'Callees';
-      items = vim.lsp.util.locations_to_items(res, client.offset_encoding);
-      context = ctx;
-    })
-    vim.api.nvim_command("botright copen")
-  end
-end
-
-local RequestCall = function()
-  local params = vim.lsp.util.make_position_params()
-  params.callee = true
-  vim.lsp.buf_request(0, '$ccls/call', params)
-end
-
-vim.lsp.handlers['$ccls/member'] = function(_, res, ctx, _)
-  if not res or vim.tbl_isempty(res) then
-    vim.notify('No members found')
-  else
-    local client = vim.lsp.get_client_by_id(ctx.client_id)
-    vim.fn.setqflist({}, ' ', {
-      title = 'Members';
-      items = vim.lsp.util.locations_to_items(res, client.offset_encoding);
-      context = ctx;
-    })
-    vim.api.nvim_command("botright copen")
-  end
-end
-
-local RequestMemVar = function()
-  local params = vim.lsp.util.make_position_params()
-  params.kind = 0
-  vim.lsp.buf_request(0, '$ccls/member', params)
-end
-
-local RequestMemFun = function()
-  local params = vim.lsp.util.make_position_params()
-  params.kind = 3
-  vim.lsp.buf_request(0, '$ccls/member', params)
-end
-
-local RequestMemType = function()
-  local params = vim.lsp.util.make_position_params()
-  params.kind = 2
-  vim.lsp.buf_request(0, '$ccls/member', params)
-end
-
-vim.lsp.handlers['$ccls/vars'] = function(_, res, ctx, _)
-  if not res or vim.tbl_isempty(res) then
-    vim.notify('No instances found')
-  else
-    local client = vim.lsp.get_client_by_id(ctx.client_id)
-    vim.fn.setqflist({}, ' ', {
-      title = 'Instances';
-      items = vim.lsp.util.locations_to_items(res, client.offset_encoding);
-      context = ctx;
-    })
-    vim.api.nvim_command("botright copen")
-  end
-end
-
-local RequestInstances = function()
-  local params = vim.lsp.util.make_position_params()
-  vim.lsp.buf_request(0, '$ccls/vars', params)
-end
-
-vim.lsp.handlers['$ccls/inheritance'] = function(_, res, ctx, _)
-  if not res or vim.tbl_isempty(res) then
-    vim.notify('No classes found')
-  else
-    local client = vim.lsp.get_client_by_id(ctx.client_id)
-    vim.fn.setqflist({}, ' ', {
-      title = 'Classes';
-      items = vim.lsp.util.locations_to_items(res, client.offset_encoding);
-      context = ctx;
-    })
-    vim.api.nvim_command("botright copen")
-  end
-end
+-- Clangd extensions
 
 local RequestBaseClass = function()
   local params = vim.lsp.util.make_position_params()
-  params.derived = false
-  vim.lsp.buf_request(0, '$ccls/inheritance', params)
+  params.resolve = 1
+  params.direction = 1
+
+  local handler = function(_, res, ctx, _)
+    if not res or vim.tbl_isempty(res) then
+      vim.notify('No results')
+    else
+      local client = vim.lsp.get_client_by_id(ctx.client_id)
+      vim.api.nvim_call_function("TypeHierarchyHandler", {res, client.offset_encoding})
+    end
+  end
+  vim.lsp.buf_request(0, 'textDocument/typeHierarchy', params, handler)
 end
 
 local RequestDerivedClass = function()
   local params = vim.lsp.util.make_position_params()
-  params.derived = true
-  vim.lsp.buf_request(0, '$ccls/inheritance', params)
+  params.resolve = 1
+  params.direction = 0
+
+  local handler = function(_, res, ctx, _)
+    if not res or vim.tbl_isempty(res) then
+      vim.notify('No results')
+    else
+      local client = vim.lsp.get_client_by_id(ctx.client_id)
+      vim.api.nvim_call_function("TypeHierarchyHandler", {res, client.offset_encoding})
+    end
+  end
+  vim.lsp.buf_request(0, 'textDocument/typeHierarchy', params, handler)
 end
 
-local RequestRoleWrite = function()
+local RequestReferenceContainer = function()
   local params = vim.lsp.util.make_position_params()
-  params.role = 16
-  vim.lsp.buf_request(0, 'textDocument/references', params)
+  local handler = function(_, res, ctx, _)
+    if not res or vim.tbl_isempty(res) then
+      vim.notify('No results')
+    else
+      vim.api.nvim_call_function("ReferenceContainerHandler", {res})
+    end
+  end
+  vim.lsp.buf_request(0, 'textDocument/references', params, handler)
 end
 
-local RequestRoleRead = function()
-  local params = vim.lsp.util.make_position_params()
-  params.role = 8
-  vim.lsp.buf_request(0, 'textDocument/references', params)
+local RequestSwitchSourceHeader = function()
+  local params = vim.lsp.util.make_text_document_params(0)
+  local handler = function(_, res, ctx, _)
+    if not res then
+      vim.notify('No results')
+    else
+      vim.api.nvim_call_function("SwitchSourceHeaderHandler", {res})
+    end
+  end
+  vim.lsp.buf_request(0, 'textDocument/switchSourceHeader', params, handler)
 end
 
 -- Keymaps and registration
@@ -142,15 +89,10 @@ local OnAttach = function(client, bufnr)
   -- Commands
   local opts = { nargs=0 }
 
-  user_command("CallGraph", RequestCall, opts)
-  user_command("MemVars", RequestMemVar, opts)
-  user_command("MemFuns", RequestMemFun, opts)
-  user_command("MemTypes", RequestMemType, opts)
-  user_command("Instances", RequestInstances, opts)
   user_command("Base", RequestBaseClass, opts)
   user_command("Derived", RequestDerivedClass, opts)
-  user_command("WriteRefs", RequestRoleWrite, opts)
-  user_command("ReadRefs", RequestRoleRead, opts)
+  user_command("Switch", RequestSwitchSourceHeader, opts)
+  user_command("Reference", RequestReferenceContainer, opts)
 
   -- Autocommands for highlight
   vim.cmd('autocmd CursorHold <buffer> lua vim.lsp.buf.document_highlight()')
@@ -158,10 +100,17 @@ local OnAttach = function(client, bufnr)
   vim.cmd('autocmd CursorMoved <buffer> lua vim.lsp.buf.clear_references()')
 end
 
-function GetCachePath()
-  return "/home/" .. os.getenv("USER") ..  "/ccls-cache"
-end
-
 lspconfig.clangd.setup {
   on_attach = OnAttach,
+  init_options = {
+    -- Trash, don't try it again
+    clangdFileStatus = false
+  },
+  capabilities = {
+    textDocument = {
+      references = {
+        container = true
+      }
+    }
+  }
 }

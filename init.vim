@@ -712,24 +712,220 @@ endfunction
 
 command! -nargs=0 Index call <SID>Index()
 
-    unlet s:fileMap
-    call setqflist([], ' ', {'title': 'Index', 'items' : qlist})
-    copen
+function! TypeHierarchyHandler(res, encoding)
+  let items = []
+  if has_key(a:res, "children")
+    let items = a:res.children
+  elseif has_key(a:res, "parents")
+    let items = a:res.parents
+  endif
 
-    if miss
-      echom "Result list not complete"
-    endif
+  if len(items) == 1
+    let fname = v:lua.vim.uri_to_fname(items[0].uri)
+    let line = items[0].range.start.line + 1
+    let col = items[0].range.start.character + 1
+    exe "edit " . fname
+    call cursor(line, col)
+  elseif len(items) > 1
+    let items = v:lua.vim.lsp.util.locations_to_items(items, a:encoding)
+    call setqflist([], ' ', #{title: 'Hierarchy', items: items})
+    copen
   endif
 endfunction
 
-function! Test(arg)
-  function Inner() closure
-    echom a:arg
-  endfunction
-  call Inner()
+function! AstHandler(buf, kinds, res)
+  " Find first CXXRecord (class/struct/union)
+  let queue = [a:res]
+  while !empty(queue)
+    let head = queue[0]
+    let queue = queue[1:]
+    if head.kind == 'CXXRecord'
+      break
+    endif
+    if has_key(head, 'children')
+      let queue += head.children
+    endif
+  endwhile
+
+  " Load all child methods
+  if head.kind == 'CXXRecord'
+    let items = []
+    let queue = [head]
+    while !empty(queue)
+      let head = queue[0]
+      let queue = queue[1:]
+      if index(a:kinds, head.kind) >= 0
+        let lnum = head.range.start.line + 1
+        let col = head.range.start.character + 1
+        let text = getbufoneline(a:buf, lnum)[col-1:]
+        call add(items, #{bufnr: a:buf, lnum: lnum, col: col, text: text})
+      endif
+      if has_key(head, 'children')
+        let queue += head.children
+      endif
+    endwhile
+    call sort(items, {a, b -> a.lnum - b.lnum})
+    call setqflist([], ' ', #{title: 'AST', items: items})
+    copen
+  endif
 endfunction
 
+function! SwitchSourceHeaderHandler(res)
+  exe "edit " . v:lua.vim.uri_to_fname(a:res)
+endfunction
 
+function! ReferenceContainerHandler(res)
+  let items = map(a:res, "#{
+        \ filename: v:lua.vim.uri_to_fname(v:val.uri),
+        \ lnum: v:val.range.start.line + 1,
+        \ col: v:val.range.start.character + 1,
+        \ text: v:val.containerName}")
+  call sort(items, {a, b -> a.lnum - b.lnum})
+  call setqflist([], ' ', #{title: "References", items: items})
+  copen
+endfunction
 
-command! -nargs=0 Index call <SID>Index()
+function! s:LspRequestSync(buf, method, params)
+  let resp = v:lua.vim.lsp.buf_request_sync(a:buf, a:method, a:params)
+  if type(resp) != type([]) || len(resp) == 0
+    return #{}
+  endif
+  if type(resp[0]) != type(#{}) || !has_key(resp[0], "result")
+    return #{}
+  endif
+  return resp[0].result
+endfunction
+
+function! SymbolInfo()
+  let params = v:lua.vim.lsp.util.make_position_params()
+  let resp = s:LspRequestSync(0, 'textDocument/symbolInfo', params)
+  return resp[0]
+endfunction
+
+command! -nargs=0 Info echo SymbolInfo()
+
+function! SyntaxTreeCword()
+  let line = getpos('.')[1] - 1
+  let char = getpos('.')[2] - 1
+  let range = #{start: #{line: line, character: char}, end: #{line: line, character: char + 1}}
+  let params = #{textDocument: #{uri: v:lua.vim.uri_from_bufnr(0)}, range: range}
+  let resp =  s:LspRequestSync(0, 'textDocument/ast', params)
+  return resp
+endfunction
+
+command! -nargs=0 Tree echo SyntaxTreeCword()
+
+function! s:Instances()
+  let params = v:lua.vim.lsp.util.make_position_params()
+  let resp = s:LspRequestSync(0, 'textDocument/references', params)
+  if empty(resp)
+    echo "No response"
+    return
+  endif
+  let info = SymbolInfo()
+  let excludeContainer = get(info, "containerName", "") . info.name
+
+  let items = []
+  for ref in resp
+    if stridx(ref.containerName, excludeContainer) < 0
+      let fname = v:lua.vim.uri_to_fname(ref.uri)
+      let buf = bufnr(fname, v:true)
+      let lnum = ref.range.start.line + 1
+      let col = ref.range.start.character + 1
+      call bufload(buf)
+      call add(items, #{filename: fname, lnum: lnum, col: col, text: getbufoneline(buf, lnum)[col-1:]})
+    endif
+  endfor
+  if empty(items)
+    echo "No instances"
+  else
+    call sort(items, {a, b -> a.lnum - b.lnum})
+    call setqflist([], ' ', #{title: "Instances", items: items})
+    copen
+  endif
+endfunction
+
+command! -nargs=0 Instances call <SID>Instances()
+
+" Convenience method allowing s:Method to work on instances
+function! s:FindInstanceType()
+  let info = SymbolInfo()
+  if !has_key(info, "definitionRange")
+    return #{}
+  endif
+  let range = info.definitionRange.range
+  let uri = info.definitionRange.uri
+  let params = #{range: range, textDocument: #{uri: uri}}
+  let resp =  s:LspRequestSync(v:lua.vim.uri_to_bufnr(uri), 'textDocument/ast', params)
+  if empty(resp)
+    return #{}
+  endif
+  " Locate variable type in the definition AST
+  let queue = [resp]
+  while !empty(queue)
+    let head = queue[0]
+    let queue = queue[1:]
+    if head.kind == 'record'
+      break
+    endif
+    if has_key(head, 'children')
+      let queue += head.children
+    endif
+  endwhile
+  if head.kind == 'record'
+    return #{textDocument: #{uri: uri}, range: head.range}
+  endif
+  return #{}
+endfunction
+
+function! s:Member(filterList)
+  let node = SyntaxTreeCword()
+  if !has_key(node, "kind")
+    echo "Failed to detect cword"
+    return
+  endif
+  let uri = v:lua.vim.uri_from_bufnr(0)
+  let kind = node.kind
+  let range = node.range
+  unlet node
+
+  if kind != "CXXRecord" && kind != "Record"
+    let type = s:FindInstanceType()
+    if empty(type)
+      echo "Failed to find type of instance"
+      return
+    endif
+    let uri = type.textDocument.uri
+    let range = type.range
+    let kind = "Record"
+  endif
+
+  if kind != "CXXRecord"
+    let bufnr = v:lua.vim.uri_to_bufnr(uri)
+    call bufload(bufnr)
+    let params = #{position: range.start, textDocument: #{uri: uri}}
+    let resp = s:LspRequestSync(bufnr, 'textDocument/symbolInfo', params)
+    if empty(resp) || !has_key(resp[0], "declarationRange")
+      echo "Failed to find class declaration"
+      return
+    endif
+    let uri = resp[0].declarationRange.uri
+    let range = resp[0].declarationRange.range
+    let rol = "CXXRecord"
+  endif
+
+  let params = #{textDocument: #{uri: uri}, range: range}
+  let bufnr = v:lua.vim.uri_to_bufnr(uri)
+  call bufload(bufnr)
+  let resp = s:LspRequestSync(bufnr, 'textDocument/ast', params)
+  if empty(resp)
+    echo "Failed to load AST of class"
+    return
+  endif
+  call AstHandler(bufnr, a:filterList, resp)
+endfunction
+
+command! -nargs=0 Mfun call <SID>Member(["CXXMethod", "CXXConstructor", "CXXDestructor"])
+command! -nargs=0 Mvar call <SID>Member(["Field"])
+
 "}}}
