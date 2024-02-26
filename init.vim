@@ -449,7 +449,12 @@ function! s:ReviewCompleteFiles(cmd_bang, pat) abort
   endif
   call setqflist([], ' ', #{title: "Review", items: new_items})
   call add(g:review_stack, new_items)
-  copen
+
+  if empty(new_items)
+    echo "Review completed!"
+  else
+    copen
+  endif
 endfunction
 
 command! -bang -nargs=? -complete=customlist,BufferCompl Complete  call <SID>ReviewCompleteFiles('<bang>', <q-args>)
@@ -493,7 +498,7 @@ function! s:GoToNextItem(dir)
         \ (a:dir == "prev" && idx > 1) ||
         \ (a:dir == "first" || a:dir == "last")
     copen
-    exe cmd
+    silent! exe cmd
   endif
 endfunction
 
