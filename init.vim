@@ -801,7 +801,7 @@ function! AstHandler(buf, kinds, res)
   let queue = [a:res]
   while !empty(queue)
     let head = queue[0]
-    let queue = queue[1:]
+    call remove(queue, 0)
     if head.kind == 'CXXRecord'
       break
     endif
@@ -816,7 +816,7 @@ function! AstHandler(buf, kinds, res)
     let queue = [head]
     while !empty(queue)
       let head = queue[0]
-      let queue = queue[1:]
+      call remove(queue, 0)
       if index(a:kinds, head.kind) >= 0
         let lnum = head.range.start.line + 1
         let col = head.range.start.character + 1
@@ -926,7 +926,7 @@ function! s:FindInstanceType()
   let queue = [resp]
   while !empty(queue)
     let head = queue[0]
-    let queue = queue[1:]
+    call remove(queue, 0)
     if head.kind == 'record'
       break
     endif
