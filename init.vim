@@ -1030,4 +1030,51 @@ function! RemoteCompl(ArgLead, CmdLine, CursorPos)
 endfunction
 
 command! -nargs=1 -complete=customlist,RemoteCompl Remote26 call s:Debug({"exe": <q-args>, "ssh": "root@10.1.20.26"})
+
+function! s:Make()
+  function! OnStdout(id, data, event)
+    for data in a:data
+      let text = substitute(data, '\n', '', 'g')
+      if len(text) > 0
+        let item = #{text: text, value: 0}
+        call setqflist([], 'a', #{items: [item]})
+      endif
+    endfor
+  endfunction
+
+  function! OnStderr(id, data, event)
+    for data in a:data
+      let text = substitute(data, '\n', '', 'g')
+      if len(text) > 0
+        let m = matchlist(text, '\(.*\):\([0-9]\+\):\([0-9]\+\): \(.*\)')
+        if len(m) >= 5
+          let file = m[1]
+          let lnum = m[2]
+          let col = m[3]
+          let text = m[4]
+          if filereadable(file) && !empty(text)
+            let item = #{filename: file, text: text, lnum: lnum, col: col}
+            call setqflist([], 'a', #{items: [item]})
+          endif
+        endif
+      endif
+    endfor
+  endfunction
+
+  function! OnExit(id, code, event)
+    if a:code == 0
+      echom "Make successful!"
+    else
+      echom "Make failed!"
+      copen
+    endif
+  endfunction
+
+  call setqflist([], ' ', #{title: "Make"})
+  let opts = #{on_stdout: function("OnStdout"), on_stderr: function("OnStderr"), on_exit: function("OnExit")}
+  let id = jobstart(["/bin/bash", "-c", "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux; make"], opts)
+endfunction
+
+command! -nargs=0 Make call <SID>Make()
+
 "}}}
