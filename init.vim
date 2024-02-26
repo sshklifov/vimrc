@@ -394,6 +394,12 @@ inoremap {<CR> {<CR>}<C-o>O
 nmap <leader>sp :setlocal invspell<CR>
 
 function! s:Review()
+  if exists("g:review_stack")
+    call setqflist([], ' ', #{title: "Review", items: g:review_stack[-1]})
+    copen
+    return
+  endif
+
   let dict = FugitiveExecute(["log", "origin/main..HEAD", "--pretty=format:%H"])
   if dict['exit_status'] != 0
     echo "Review failed, have you checked out the branch?"
@@ -422,28 +428,45 @@ function! s:Review()
   for b in bufs
     call setbufvar(b, "commitish", bpoint)
   endfor
+  let g:review_stack = [getqflist()]
 endfunction
 
 command! -nargs=0 Review call <SID>Review()
 
-function! s:ReviewCompleteFiles(cmdBang, files) abort
-  " Invert bang
-  let bang = a:cmdBang == "!" ? "" : "!"
-  " Rewind to Review quickfix
-  while getqflist(#{title: 0})['title'] != "Review"
-    cold
-  endwhile
-
-  if len(a:files) > 0
-    exe "Cfilter" . bang . " " . a:files
-  else
-    call setqflist(filter(getqflist(), "v:val.bufnr " . bang . "= " . bufnr("%")))
+function! s:ReviewCompleteFiles(cmd_bang, pat) abort
+  if !exists("g:review_stack")
+    echo "Start a review first"
+    return
   endif
-  call setqflist([], 'a', #{title: "Review"})
+
+  let new_items = copy(g:review_stack[-1])
+  if !empty(a:pat)
+    let comp = a:cmd_bang == "!" ? "!=" : "=="
+    let new_items = filter(new_items, "match(bufname(v:val.bufnr), '" . a:pat . "') " . comp . " -1")
+  else
+    let comp = a:cmd_bang == "!" ? "== " : "!= "
+    let new_items = filter(new_items, "v:val.bufnr " . comp . bufnr("%"))
+  endif
+  call setqflist([], ' ', #{title: "Review", items: new_items})
+  call add(g:review_stack, new_items)
   copen
 endfunction
 
-command! -bang -nargs=? Complete  call <SID>ReviewCompleteFiles('<bang>', <q-args>)
+command! -bang -nargs=? -complete=customlist,BufferCompl Complete  call <SID>ReviewCompleteFiles('<bang>', <q-args>)
+
+function! s:UncompleteFiles()
+  if !exists("g:review_stack")
+    echo "Start a review first"
+    return
+  endif
+  if len(g:review_stack) > 1
+    call remove(g:review_stack, -1)
+    call setqflist([], ' ', #{title: "Review", items: g:review_stack[-1]})
+    copen
+  end
+endfunction
+
+command! -nargs=0 Uncomplete call <SID>UncompleteFiles()
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
