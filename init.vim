@@ -1050,10 +1050,17 @@ endfunction
 command! -nargs=1 -complete=customlist,RemoteCompl Remote26 call s:Debug({"exe": <q-args>, "ssh": "root@10.1.20.26"})
 
 function! s:Make()
+  if exists("g:make_outout")
+    return
+  endif
+
+  let g:make_output = []
   function! OnStdout(id, data, event)
     for data in a:data
       let text = substitute(data, '\n', '', 'g')
       if len(text) > 0
+        call add(g:make_output, text)
+
         let m = matchlist(text, '\[ *\([0-9]\+%\)\]')
         if len(m) > 1 && !empty(m[1])
           let g:statusline_dict['make'] = m[1]
@@ -1063,11 +1070,12 @@ function! s:Make()
   endfunction
 
   let g:make_error_list = []
-
   function! OnStderr(id, data, event)
     for data in a:data
       let text = substitute(data, '\n', '', 'g')
       if len(text) > 0
+        call add(g:make_output, text)
+
         let m = matchlist(text, '\(.*\):\([0-9]\+\):\([0-9]\+\): \(.*\)')
         if len(m) >= 5
           let file = m[1]
@@ -1088,9 +1096,18 @@ function! s:Make()
       echom "Make successful!"
     else
       echom "Make failed!"
-      call setqflist([], ' ', #{title: "Make", items: g:make_error_list})
-      copen
+      if len(g:make_error_list) > 0
+        call setqflist([], ' ', #{title: "Make", items: g:make_error_list})
+        copen
+      else
+        bot split Make
+        set buftype=nofile swapfile buflisted
+        silent call deletebufline(bufnr(), 1, "$")
+        call append(0, g:make_output)
+        call cursor(1, 1)
+      endif
     endif
+    unlet g:make_output
     unlet g:make_error_list
     silent! unlet g:statusline_dict['make']
   endfunction
