@@ -1053,11 +1053,15 @@ function! s:Make()
     for data in a:data
       let text = substitute(data, '\n', '', 'g')
       if len(text) > 0
-        let item = #{text: text, value: 0}
-        call setqflist([], 'a', #{items: [item]})
+        let m = matchlist(text, '\[ *\([0-9]\+%\)\]')
+        if len(m) > 1 && !empty(m[1])
+          let g:statusline_dict['make'] = m[1]
+        endif
       endif
     endfor
   endfunction
+
+  let g:make_error_list = []
 
   function! OnStderr(id, data, event)
     for data in a:data
@@ -1071,7 +1075,7 @@ function! s:Make()
           let text = m[4]
           if filereadable(file) && !empty(text)
             let item = #{filename: file, text: text, lnum: lnum, col: col}
-            call setqflist([], 'a', #{items: [item]})
+            call add(g:make_error_list, item)
           endif
         endif
       endif
@@ -1083,8 +1087,11 @@ function! s:Make()
       echom "Make successful!"
     else
       echom "Make failed!"
+      call setqflist([], ' ', #{title: "Make", items: g:make_error_list})
       copen
     endif
+    unlet g:make_error_list
+    unlet g:statusline_dict['make']
   endfunction
 
   call setqflist([], ' ', #{title: "Make"})
