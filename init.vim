@@ -247,39 +247,20 @@ function! s:PathShorten(file, maxwidth)
   endif
 endfunction
 
-function! GetLspStatusLine()
-  let serverResponses = luaeval('vim.lsp.util.get_progress_messages()')
-  if empty(serverResponses)
-    return ""
-  endif
+" Modules which want to write to the progress portion of the statusline can add their keys here
+let g:statusline_dict = #{}
+" Must register modules here. When multiple modules have progress output, items at the front of the
+" list will take precedence
+let g:statusline_prio = ['make', 'lsp']
+call dictwatcheradd(g:statusline_dict, '*', {d, k, z -> execute('redrawstatus')})
 
-  function! GetServerProgress(_, status)
-    if !has_key(a:status, 'message')
-      return [0, 0]
+function! GetProgressStatusLine(...)
+  for key in g:statusline_prio
+    if has_key(g:statusline_dict, key) && !empty(g:statusline_dict[key])
+      return g:statusline_dict[key]
     endif
-    let msg = a:status['message']
-    let partFiles = split(msg, "/")
-    if len(partFiles) != 2
-      return [0, 0]
-    endif
-    return [str2nr(partFiles[0]), str2nr(partFiles[1])]
-  endfunction
-
-  let serverProgress = map(serverResponses, function("GetServerProgress"))
-
-  let totalFiles = 0
-  let totalDone = 0
-  for progress in serverProgress
-    let totalDone += progress[0]
-    let totalFiles += progress[1]
   endfor
-
-  if totalFiles == 0
-    return ""
-  endif
-
-  let percentage = (100 * totalDone) / totalFiles
-  return percentage . "%"
+  return ''
 endfunction
 
 function! BranchStatusLine()
@@ -294,7 +275,7 @@ endfunction
 
 set statusline=
 set statusline+=%(%{BranchStatusLine()}\ %)
-set statusline+=%(%{GetFileStatusLine()}\ %{GetLspStatusLine()}%m%h%r%)
+set statusline+=%(%{GetFileStatusLine()}\ %{GetProgressStatusLine()}%m%h%r%)
 set statusline+=%=
 set statusline+=%(%l,%c\ %10.p%%%)
 
@@ -765,8 +746,44 @@ highlight! link @lsp.typemod.function.defaultLibrary Function
 
 lua require('lsp')
 
-autocmd User LspProgressUpdate redrawstatus
-autocmd User LspRequest redrawstatus
+function! s:UpdateLspProgress() 
+  let serverResponses = luaeval('vim.lsp.util.get_progress_messages()')
+  if empty(serverResponses)
+    unlet g:statusline_dict.lsp
+    return
+  endif
+
+  function! GetServerProgress(_, status)
+    if !has_key(a:status, 'message')
+      return [0, 0]
+    endif
+    let msg = a:status['message']
+    let partFiles = split(msg, "/")
+    if len(partFiles) != 2
+      return [0, 0]
+    endif
+    return [str2nr(partFiles[0]), str2nr(partFiles[1])]
+  endfunction
+
+  let serverProgress = map(serverResponses, function("GetServerProgress"))
+
+  let totalFiles = 0
+  let totalDone = 0
+  for progress in serverProgress
+    let totalDone += progress[0]
+    let totalFiles += progress[1]
+  endfor
+
+  if totalFiles == 0
+    unlet g:statusline_dict.lsp
+    return
+  endif
+
+  let percentage = (100 * totalDone) / totalFiles
+  let g:statusline_dict.lsp = percentage . "%"
+endfunction
+
+autocmd User LspProgressUpdate call <SID>UpdateLspProgress()
 
 function! s:Index()
   let source = ["c", "cc", "cp", "cxx", "cpp", "CPP", "c++", "C"]
