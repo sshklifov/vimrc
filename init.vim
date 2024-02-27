@@ -750,7 +750,7 @@ lua require('lsp')
 function! s:UpdateLspProgress() 
   let serverResponses = luaeval('vim.lsp.util.get_progress_messages()')
   if empty(serverResponses)
-    unlet g:statusline_dict.lsp
+    silent! unlet g:statusline_dict.lsp
     return
   endif
 
@@ -776,7 +776,7 @@ function! s:UpdateLspProgress()
   endfor
 
   if totalFiles == 0
-    unlet g:statusline_dict.lsp
+    silent! unlet g:statusline_dict.lsp
     return
   endif
 
@@ -1092,7 +1092,7 @@ function! s:Make()
       copen
     endif
     unlet g:make_error_list
-    unlet g:statusline_dict['make']
+    silent! unlet g:statusline_dict['make']
   endfunction
 
   call setqflist([], ' ', #{title: "Make"})
