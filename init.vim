@@ -458,7 +458,7 @@ command! -nargs=0 Uncomplete call <SID>UncompleteFiles()
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:GoToNextItem(dir)
-  if &foldmethod == "diff"
+  if &diff
     if a:dir == "prev"
       exe "normal! [c"
     elseif a:dir == "next"
@@ -470,6 +470,7 @@ function! s:GoToNextItem(dir)
   let listProps = getqflist({"size": 1, "idx": 0})
   let cmd = "c" . a:dir
   let size = listProps["size"]
+  " 1-based index
   let idx = listProps["idx"]
   if size == 0
     return
