@@ -1021,6 +1021,25 @@ command! -nargs=0 Mvar call <SID>Member(["Field"])
 
 """"""""""""""""""""""""""""Context dependent"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function! s:OpenCMakeLists()
+  let dir = expand("%:p:h")
+  let repo = FugitiveWorkTree()
+  if len(repo) <= 0
+    return
+  endif
+
+  while len(dir) >= len(repo)
+    let lists = dir . "/CMakeLists.txt"
+    if filereadable(lists)
+      exe "edit " . lists
+      return
+    endif
+    let dir = fnamemodify(dir, ":h")
+  endwhile
+endfunction
+
+command! CMake call <SID>OpenCMakeLists()
+
 function! s:ResolveEnvFile()
   let fname = expand("%:f")
   let idx = stridx(fname, "include/alcatraz")
