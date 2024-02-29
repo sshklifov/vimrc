@@ -399,21 +399,29 @@ inoremap {<CR> {<CR>}<C-o>O
 
 nmap <leader>sp :setlocal invspell<CR>
 
-function! s:Review(main)
+function! s:Review(arg)
   if exists("g:review_stack")
     call setqflist([], ' ', #{title: "Review", items: g:review_stack[-1]})
     copen
     return
   endif
 
-  if empty(a:main)
-    let range = "origin/main...HEAD"
-  else
-    let range = a:main . "..HEAD"
+  " Run a test command
+  if FugitiveExecute(["status"])['exit_status'] != 0
+    echo "Review failed, are you inside a git repository?"
+    return
   endif
+  " See if mainline exists
+  let main = empty(a:arg) ? "main" : a:arg
+  if FugitiveExecute(["show", main])['exit_status'] != 0
+    echo "Review failed, does the mainline exist?"
+    return
+  endif
+
+  let range = main . "..HEAD"
   let dict = FugitiveExecute(["log", range, "--pretty=format:%H"])
   if dict['exit_status'] != 0
-    echo "Review failed, have you checked out the branch?"
+    echo "Review failed, have you checked out " . main . "?"
     return
   endif
 
@@ -429,7 +437,7 @@ function! s:Review(main)
     endif
   endif
   if !exists('bpoint')
-    echo "Could not determine branch point, have you fetched?"
+    echo "Could not determine branch point, is the mainline up to date?"
     return
   endif
 
