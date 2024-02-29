@@ -421,11 +421,10 @@ endfunction
 
 function! s:GetRefs(ref_dirs, arg)
   let result = []
-
-  let pat = ".*" . a:arg . ".*"
   let dirs = map(a:ref_dirs, 'FugitiveGitDir() . "/" . v:val')
   for dir in dirs
     if isdirectory(dir)
+      let pat = dir . ".*" . a:arg . ".*"
       let cmd = ["find", dir, "-type", "f", "-regex", pat, "-printf", "%P\n"]
       let result += split(system(cmd), nr2char(10))
     endif
