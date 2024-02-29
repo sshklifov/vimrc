@@ -1072,12 +1072,19 @@ function! RemoteCompl(ArgLead, CmdLine, CursorPos)
   return split(system(["ssh", "-o", "ConnectTimeout=1", machine, find]), nr2char(10))
 endfunction
 
-command! -nargs=1 -complete=customlist,RemoteCompl Remote26 call s:Debug({"exe": <q-args>, "ssh": "root@10.1.20.26"})
-
-function! s:Make()
-  if exists("g:make_outout")
-    return
+" TODO Does not work ideally yet...
+function! s:ExecuteRemote(ip_octet, exe)
+  let debug_args = #{}
+  let debug_args['ssh'] = "root@10.1.20." . a:ip_octet
+  if !empty(a:exe)
+    let debug_args['exe'] = a:exe
   endif
+  call s:Debug(debug_args)
+endfunction
+
+command! -nargs=? -complete=customlist,RemoteCompl Remote26 call <SID>ExecuteRemote("26", <q-args>)
+command! -nargs=? -complete=customlist,RemoteCompl Remote14 call <SID>ExecuteRemote("14", <q-args>)
+command! -nargs=1 -complete=customlist,AttachCompl Attach14 call s:Debug({"proc": <q-args>, "ssh": "root@10.1.20.14"})
 
 function! s:Make(bang, target)
   function! OnStdout(id, data, event)
