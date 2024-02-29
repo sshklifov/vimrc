@@ -1047,8 +1047,9 @@ function! s:ResolveEnvFile()
     let resolved = "/home/stef/libalcatraz/" . fname[idx:]
     if filereadable(resolved)
       let pos = getcurpos()[1:]
+      let view = winsaveview()
       exe "edit " . resolved
-      call cursor(pos)
+      call winrestview(view)
     else
       echo "Sorry, I'm buggy, Update me!"
     endif
