@@ -1079,13 +1079,11 @@ function! s:Make()
     return
   endif
 
-  let g:make_output = []
+function! s:Make(bang, target)
   function! OnStdout(id, data, event)
     for data in a:data
       let text = substitute(data, '\n', '', 'g')
       if len(text) > 0
-        call add(g:make_output, text)
-
         let m = matchlist(text, '\[ *\([0-9]\+%\)\]')
         if len(m) > 1 && !empty(m[1])
           let g:statusline_dict['make'] = m[1]
@@ -1094,20 +1092,17 @@ function! s:Make()
     endfor
   endfunction
 
-  let g:make_error_list = []
   function! OnStderr(id, data, event)
     for data in a:data
       let text = substitute(data, '\n', '', 'g')
       if len(text) > 0
-        call add(g:make_output, text)
-
         let m = matchlist(text, '\(.*\):\([0-9]\+\):\([0-9]\+\): \(.*\)')
         if len(m) >= 5
           let file = m[1]
           let lnum = m[2]
           let col = m[3]
           let text = m[4]
-          if filereadable(file) && !empty(text)
+          if filereadable(file) && (stridx(text, "error:") >= 0 || stridx(text, "warning:") >= 0)
             let item = #{filename: file, text: text, lnum: lnum, col: col}
             call add(g:make_error_list, item)
           endif
@@ -1124,24 +1119,24 @@ function! s:Make()
       if len(g:make_error_list) > 0
         call setqflist([], ' ', #{title: "Make", items: g:make_error_list})
         copen
-      else
-        bot split Make
-        set buftype=nofile swapfile buflisted
-        silent call deletebufline(bufnr(), 1, "$")
-        call append(0, g:make_output)
-        call cursor(1, 1)
       endif
     endif
-    unlet g:make_output
     unlet g:make_error_list
     silent! unlet g:statusline_dict['make']
   endfunction
 
-  call setqflist([], ' ', #{title: "Make"})
-  let opts = #{on_stdout: function("OnStdout"), on_stderr: function("OnStderr"), on_exit: function("OnExit")}
-  let id = jobstart(["/bin/bash", "-c", "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux; make"], opts)
+  let cmd = ["/bin/bash", "-c", "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux; make " . a:target]
+  if a:bang == ""
+    let g:make_error_list = []
+    let opts = #{cwd: FugitiveWorkTree(), on_stdout: function("OnStdout"), on_stderr: function("OnStderr"), on_exit: function("OnExit")}
+    let id = jobstart(cmd, opts)
+  else
+    bot new
+    let id = termopen(cmd, #{cwd: FugitiveWorkTree()})
+    call cursor("$", 1)
+  endif
 endfunction
 
-command! -nargs=0 Make call <SID>Make()
+command! -nargs=? -bang Make call <SID>Make("<bang>", <q-args>)
 
 "}}}
