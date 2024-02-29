@@ -321,34 +321,54 @@ xnoremap <silent> <leader>P :<C-W>set
 
 command! -bar Retab set invexpandtab | retab!
 
-function! s:ToggleDiff()
-  cclose " TODO patch
+function! s:DiffFugitiveWinid()
+  " Load all windows in tab
   let winids = gettabinfo(tabpagenr())[0]["windows"]
-  let fugitive_winids = []
-  let diff_winids = []
-  for winid in winids
-    let winnr = win_id2tabwin(winid)[1]
-    let bufnr = winbufnr(winnr)
-    let name = bufname(bufnr)
-    if win_execute(winid, "echon &diff") == "1"
-      call add(diff_winids, winid)
-    endif
-    if name =~# "^fugitive:///"
-      call add(fugitive_winids, winid)
-    endif
-  endfor
+  let winfos = map(winids, "getwininfo(v:val)[0]")
+  " Ignore quickfix
+  let winfos = filter(winfos, "v:val.quickfix != 1")
 
-  if len(winids) == 1 && len(diff_winids) == 0 && len(fugitive_winids) == 0
-    if exists("b:commitish") && b:commitish != "0"
-      exe "lefta Gdiffsplit " . b:commitish
-    else
-      exe "lefta Gdiffsplit"
-    endif
-    return
-  elseif len(winids) == 2 && len(diff_winids) == 2 && len(fugitive_winids) == 1
-    let winid = fugitive_winids[0]
-    let winnr = win_id2tabwin(winid)[1]
-    let bufnr = winbufnr(winnr)
+  " Consider two way diffs only
+  if len(winfos) != 2
+    return -1
+  endif
+  " Both buffers should have 'diff' set
+  if win_execute(winfos[0].winid, "echon &diff") != "1" || win_execute(winfos[1].winid, "echon &diff") != "1"
+    return -1
+  endif
+  " Consider diffs comming from fugitive plugin only
+  if bufname(winfos[0].bufnr) =~# "^fugitive:///"
+    return winfos[0].winid
+  endif
+  if bufname(winfos[1].bufnr) =~# "^fugitive:///"
+    return winfos[1].winid
+  endif
+  return -1
+endfunction
+
+function! s:CanStartDiff()
+  " Load all windows in tab
+  let winids = gettabinfo(tabpagenr())[0]["windows"]
+  let winfos = map(winids, "getwininfo(v:val)[0]")
+  " Ignore quickfix
+  let winfos = filter(winfos, "v:val.quickfix != 1")
+  " Only a single file can be opened
+  if len(winfos) != 1
+    return 0
+  endif
+  " Must exist on disk
+  let bufnr = winfos[0].bufnr
+  if !filereadable(bufname(bufnr))
+    return 0
+  endif
+  " Must be inside git
+  return !empty(FugitiveGitDir(bufnr))
+endfunction
+
+function! s:ToggleDiff()
+  let winid = s:DiffFugitiveWinid()
+  if winid >= 0
+    let bufnr = getwininfo(winid)[0].bufnr
     let name = bufname(bufnr)
     let commitish = split(FugitiveParse(name)[0], ":")[0]
     let realnr = bufnr(FugitiveReal(name))
@@ -358,8 +378,13 @@ function! s:ToggleDiff()
     let b:commitish = commitish
     " Close fugitive window
     quit
-  else
-    echo "You done fucked up..."
+  elseif s:CanStartDiff()
+    cclose
+    if exists("b:commitish") && b:commitish != "0"
+      exe "lefta Gdiffsplit " . b:commitish
+    else
+      exe "lefta Gdiffsplit"
+    endif
   endif
 endfunction
 
@@ -432,6 +457,10 @@ function! s:ReviewCompleteFiles(cmd_bang, pat) abort
   else
     let comp = a:cmd_bang == "!" ? "== " : "!= "
     let new_items = filter(new_items, "v:val.bufnr " . comp . bufnr("%"))
+    " Close diff
+    if s:DiffFugitiveWinid() >= 0
+      call s:ToggleDiff()
+    endif
   endif
   call setqflist([], ' ', #{title: "Review", items: new_items})
   call add(g:review_stack, new_items)
