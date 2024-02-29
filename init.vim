@@ -374,14 +374,19 @@ inoremap {<CR> {<CR>}<C-o>O
 
 nmap <leader>sp :setlocal invspell<CR>
 
-function! s:Review()
+function! s:Review(main)
   if exists("g:review_stack")
     call setqflist([], ' ', #{title: "Review", items: g:review_stack[-1]})
     copen
     return
   endif
 
-  let dict = FugitiveExecute(["log", "origin/main..HEAD", "--pretty=format:%H"])
+  if empty(a:main)
+    let range = "origin/main...HEAD"
+  else
+    let range = a:main . "..HEAD"
+  endif
+  let dict = FugitiveExecute(["log", range, "--pretty=format:%H"])
   if dict['exit_status'] != 0
     echo "Review failed, have you checked out the branch?"
     return
@@ -399,7 +404,7 @@ function! s:Review()
     endif
   endif
   if !exists('bpoint')
-    echo "Could not determine branch point, have you fetched main?"
+    echo "Could not determine branch point, have you fetched?"
     return
   endif
 
@@ -412,7 +417,7 @@ function! s:Review()
   let g:review_stack = [getqflist()]
 endfunction
 
-command! -nargs=0 Review call <SID>Review()
+command! -nargs=? Review call <SID>Review(<q-args>)
 
 function! s:ReviewCompleteFiles(cmd_bang, pat) abort
   if !exists("g:review_stack")
