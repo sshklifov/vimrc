@@ -319,7 +319,7 @@ xnoremap <silent> <leader>p :<C-W>set
 xnoremap <silent> <leader>P :<C-W>set
       \ paste <Bar> exe 'silent! normal! gv"+P' <Bar> set nopaste<CR>
 
-command! -bar Retab set invexpandtab | retab!
+command! -nargs=0 -bar Retab set invexpandtab | retab!
 
 function! s:DiffFugitiveWinid()
   " Load all windows in tab
@@ -450,7 +450,19 @@ function! s:Review(arg)
   let g:review_stack = [getqflist()]
 endfunction
 
-command! -nargs=? Review call <SID>Review(<q-args>)
+command! -nargs=? -complete=customlist,ReviewCompl Review call <SID>Review(<q-args>)
+
+function! ReviewCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+
+  let heads = FugitiveGitDir() . "/refs/heads"
+  let pat = ".*" . a:ArgLead . ".*"
+  let cmd = ["find", heads, "-type", "f", "-regex", pat, "-printf", "%P\n"]
+  return split(system(cmd), nr2char(10))
+endfunction
+
 
 function! s:ReviewCompleteFiles(cmd_bang, pat) abort
   if !exists("g:review_stack")
@@ -464,7 +476,8 @@ function! s:ReviewCompleteFiles(cmd_bang, pat) abort
     let new_items = filter(new_items, "match(bufname(v:val.bufnr), '" . a:pat . "') " . comp . " -1")
   else
     let comp = a:cmd_bang == "!" ? "== " : "!= "
-    let new_items = filter(new_items, "v:val.bufnr " . comp . bufnr("%"))
+    let bufnr = bufnr(FugitiveReal(bufname("%")))
+    let new_items = filter(new_items, "v:val.bufnr " . comp . bufnr)
     " Close diff
     if s:DiffFugitiveWinid() >= 0
       call s:ToggleDiff()
@@ -838,6 +851,7 @@ function! s:Index()
   copen
 endfunction
 
+" TODO completion?
 command! -nargs=0 Index call <SID>Index()
 
 function! TypeHierarchyHandler(res, encoding)
@@ -1075,7 +1089,7 @@ function! s:OpenCMakeLists()
   endwhile
 endfunction
 
-command! CMake call <SID>OpenCMakeLists()
+command! -nargs=0 CMake call <SID>OpenCMakeLists()
 
 function! s:ResolveEnvFile()
   let fname = expand("%:f")
@@ -1181,6 +1195,7 @@ function! s:Make(bang, target)
   endif
 endfunction
 
+" TODO completion?
 command! -nargs=? -bang Make call <SID>Make("<bang>", <q-args>)
 
 "}}}
