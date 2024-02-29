@@ -399,6 +399,59 @@ inoremap {<CR> {<CR>}<C-o>O
 
 nmap <leader>sp :setlocal invspell<CR>
 
+function! s:SwitchToBranch(arg)
+  let dict = FugitiveExecute(["status", "--porcelain"])
+  if dict['exit_status'] != 0
+    echo "Are you inside a git repository?"
+    return
+  endif
+  if len(dict) > 1 && dict['stdout'][0] != ''
+    echo "Is repo dirty?"
+    return
+  endif
+
+  let dict = FugitiveExecute(["checkout", a:arg])
+  if dict['exit_status'] != 0
+    echo "Failed to checkout " . a:arg
+    return
+  endif
+
+  exe "Make!"
+endfunction
+
+function! s:GetRefs(ref_dirs, arg)
+  let result = []
+
+  let pat = ".*" . a:arg . ".*"
+  let dirs = map(a:ref_dirs, 'FugitiveGitDir() . "/" . v:val')
+  for dir in dirs
+    if isdirectory(dir)
+      let cmd = ["find", dir, "-type", "f", "-regex", pat, "-printf", "%P\n"]
+      let result += split(system(cmd), nr2char(10))
+    endif
+  endfor
+  return uniq(sort(result))
+endfunction
+
+command! -nargs=1 -complete=customlist,BranchCompl Branch call <SID>SwitchToBranch(<q-args>)
+
+function! BranchCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  return s:GetRefs(['refs/heads', 'refs/tags'], a:ArgLead)
+endfunction
+
+command! -nargs=1 -complete=customlist,OriginCompl Origin call <SID>SwitchToBranch(<q-args>)
+
+function! OriginCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  call FugitiveExecute(['fetch', 'origin'])
+  return s:GetRefs(['refs/remotes/origin'], a:ArgLead)
+endfunction
+
 function! s:Review(arg)
   if exists("g:review_stack")
     call setqflist([], ' ', #{title: "Review", items: g:review_stack[-1]})
@@ -450,19 +503,7 @@ function! s:Review(arg)
   let g:review_stack = [getqflist()]
 endfunction
 
-command! -nargs=? -complete=customlist,ReviewCompl Review call <SID>Review(<q-args>)
-
-function! ReviewCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-
-  let heads = FugitiveGitDir() . "/refs/heads"
-  let pat = ".*" . a:ArgLead . ".*"
-  let cmd = ["find", heads, "-type", "f", "-regex", pat, "-printf", "%P\n"]
-  return split(system(cmd), nr2char(10))
-endfunction
-
+command! -nargs=? -complete=customlist,OriginCompl Review call <SID>Review(<q-args>)
 
 function! s:ReviewCompleteFiles(cmd_bang, pat) abort
   if !exists("g:review_stack")
@@ -1172,6 +1213,7 @@ function! s:Make(bang, target)
   function! OnExit(id, code, event)
     if a:code == 0
       echom "Make successful!"
+      exe "LspRestart"
     else
       echom "Make failed!"
       if len(g:make_error_list) > 0
@@ -1179,7 +1221,7 @@ function! s:Make(bang, target)
         copen
       endif
     endif
-    unlet g:make_error_list
+    silent! unlet g:make_error_list
     silent! unlet g:statusline_dict['make']
   endfunction
 
@@ -1187,10 +1229,10 @@ function! s:Make(bang, target)
   if a:bang == ""
     let g:make_error_list = []
     let opts = #{cwd: FugitiveWorkTree(), on_stdout: function("OnStdout"), on_stderr: function("OnStderr"), on_exit: function("OnExit")}
-    let id = jobstart(cmd, opts)
+    call jobstart(cmd, opts)
   else
     bot new
-    let id = termopen(cmd, #{cwd: FugitiveWorkTree()})
+    let id = termopen(cmd, #{cwd: FugitiveWorkTree(), on_exit: function("OnExit")})
     call cursor("$", 1)
   endif
 endfunction
