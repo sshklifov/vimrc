@@ -126,7 +126,7 @@ set expandtab
 set shiftwidth=4
 set tabstop=4
 set softtabstop=0
-set cinoptions=L0,l1,b1,g0,t0,(s,U1,
+set cinoptions=L0,l1,b0,g1,t0,(s,U1,N-s
 
 " Display line numbers
 set number
@@ -294,7 +294,7 @@ command! -nargs=0 CursorSym call <SID>SynStack()
 
 nnoremap <leader><leader>q :mksession! ~/.local/share/nvim/session.vim<CR>
 nnoremap <leader>so :so ~/.local/share/nvim/session.vim<CR>
-set sessionoptions=buffers,curdir,help,localoptions,options,tabpages,winsize
+set sessionoptions=buffers,curdir,help,localoptions,tabpages,winsize
 
 nnoremap <silent> <leader>cd :lcd %:p:h<CR>
 nnoremap <silent> <leader>gcd :Gcd<CR>
