@@ -438,7 +438,7 @@ function! BranchCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return s:GetRefs(['refs/heads', 'refs/tags'], a:ArgLead)
+  return s:GetRefs(['refs/heads', 'refs/tags', 'refs/remotes'], a:ArgLead)
 endfunction
 
 command! -nargs=1 -complete=customlist,OriginCompl Origin call <SID>SwitchToBranch(<q-args>)
@@ -1215,7 +1215,7 @@ function! s:Make(bang, target)
       exe "LspRestart"
     else
       echom "Make failed!"
-      if len(g:make_error_list) > 0
+      if exists("g:make_error_list") && len(g:make_error_list) > 0
         call setqflist([], ' ', #{title: "Make", items: g:make_error_list})
         copen
       endif
