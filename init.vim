@@ -885,18 +885,62 @@ endfunction
 
 autocmd User LspProgressUpdate call <SID>UpdateLspProgress()
 
-function! s:Index()
+" TODO move
+function! s:ItemsCompl(items, pat)
+  if a:pat !~# "[A-Z]"
+    let mpat = '\c' . a:pat
+  else
+    let mpat = '\C' . a:pat
+  endif
+
+  let compl = []
+  for item in a:items
+    let parts = split(item, "/")
+    for part in parts
+      if match(part, mpat) >= 0
+        call add(compl, part)
+      endif
+    endfor
+  endfor
+  return uniq(sort(compl))
+endfunction
+
+" TODO USE
+function! s:PatFilter(items, pat)
+  return filter(a:items, "match(v:val, '" . a:pat . "') >= 0")
+endfunction
+
+" TODO USE
+function! s:ToQuickfix(files, title)
+  let items = map(a:files, "#{filename: v:val}")
+  if len(items) <= 0
+    echo "No entries"
+  else
+    call setqflist([], ' ', #{title: a:title, items: items})
+    copen
+    if len(items) == 1
+      cc
+    endif
+  endif
+  copen
+endfunction
+
+function! s:GetIndex()
   let source = ["c", "cc", "cp", "cxx", "cpp", "CPP", "c++", "C"]
   let header = ["h", "hh", "H", "hp", "hxx", "hpp", "HPP", "h++", "tcc"]
   let regex = '.*\.\(' . join(source, '\|') . '\|' . join(header, '\|') . '\)'
   let files = systemlist(["find", FugitiveWorkTree(), "-regex", regex])
-  let items = map(files, "#{lnum: 1, col: 1, filename: v:val}")
-  call setqflist([], ' ', #{title: "Index", items: items})
-  copen
+  return files
 endfunction
 
-" TODO completion?
-command! -nargs=0 Index call <SID>Index()
+function! IndexCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  return s:ItemsCompl(s:GetIndex(), a:ArgLead)
+endfunction
+
+command! -nargs=1 -complete=customlist,IndexCompl Index call s:GetIndex()->s:PatFilter(<q-args>)->s:ToQuickfix('Index')
 
 function! TypeHierarchyHandler(res, encoding)
   let items = []
