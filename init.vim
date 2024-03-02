@@ -369,6 +369,10 @@ function! s:ToggleDiff()
   let winid = s:DiffFugitiveWinid()
   if winid >= 0
     let bufnr = getwininfo(winid)[0].bufnr
+    if getbufvar(bufnr, '&mod') == 1
+      echo "No write since last change"
+      return
+    endif
     let name = bufname(bufnr)
     let commitish = split(FugitiveParse(name)[0], ":")[0]
     let realnr = bufnr(FugitiveReal(name))
@@ -426,7 +430,7 @@ function! s:GetRefs(ref_dirs, arg)
     if isdirectory(dir)
       let pat = dir . ".*" . a:arg . ".*"
       let cmd = ["find", dir, "-type", "f", "-regex", pat, "-printf", "%P\n"]
-      let result += split(system(cmd), nr2char(10))
+      let result += systemlist(cmd)
     endif
   endfor
   return uniq(sort(result))
@@ -676,7 +680,7 @@ function! ExeCompl(ArgLead, CmdLine, CursorPos)
 
   let cmd = ["find", ".", '(', "-path", "**/.git", "-prune", "-false", "-o", regex, pat, ')']
   let cmd += ["-type", "f", "-executable", "-printf", "%P\n"]
-  return split(system(cmd), nr2char(10))
+  return systemlist(cmd)
 endfunction
 
 command! -nargs=1 -complete=customlist,AttachCompl Attach call s:Debug({"proc": <q-args>})
@@ -686,7 +690,7 @@ function! AttachCompl(ArgLead, CmdLine, CursorPos)
     return []
   endif
 
-  let cmdlines = split(system(["ps", "h", "-U", $USER, "-o", "command"]), nr2char(10))
+  let cmdlines = systemlist(["ps", "h", "-U", $USER, "-o", "command"])
   let compl = []
   for cmdline in cmdlines
     let name = split(cmdline, " ")[0]
@@ -714,7 +718,7 @@ function! s:Debug(args)
   " Resolve process name early
   let proc = get(a:args, "proc", "")
   if proc !~ "^[0-9]*$"
-    let pids = split(system(["pgrep", "-f", proc]), nr2char(10))
+    let pids = systemlist(["pgrep", "-f", proc])
     " Report error
     if len(pids) == 0
       echo "No processes found"
@@ -885,7 +889,7 @@ function! s:Index()
   let source = ["c", "cc", "cp", "cxx", "cpp", "CPP", "c++", "C"]
   let header = ["h", "hh", "H", "hp", "hxx", "hpp", "HPP", "h++", "tcc"]
   let regex = '.*\.\(' . join(source, '\|') . '\|' . join(header, '\|') . '\)'
-  let files = split(system(["find", FugitiveWorkTree(), "-regex", regex]), nr2char(10))
+  let files = systemlist(["find", FugitiveWorkTree(), "-regex", regex])
   let items = map(files, "#{lnum: 1, col: 1, filename: v:val}")
   call setqflist([], ' ', #{title: "Index", items: items})
   copen
@@ -1160,7 +1164,7 @@ function! RemoteCompl(ArgLead, CmdLine, CursorPos)
   let pat = ".*" . a:ArgLead . ".*"
   let find = "find /home/root/Debug -regex '" . pat . "' -type f -executable"
   let machine = "root@10.1.20." . a:CmdLine[6] . a:CmdLine[7]
-  return split(system(["ssh", "-o", "ConnectTimeout=1", machine, find]), nr2char(10))
+  return systemlist(["ssh", "-o", "ConnectTimeout=1", machine, find])
 endfunction
 
 " TODO Does not work ideally yet...
@@ -1177,66 +1181,32 @@ command! -nargs=? -complete=customlist,RemoteCompl Remote26 call <SID>ExecuteRem
 command! -nargs=? -complete=customlist,RemoteCompl Remote14 call <SID>ExecuteRemote("14", <q-args>)
 command! -nargs=1 -complete=customlist,AttachCompl Attach14 call s:Debug({"proc": <q-args>, "ssh": "root@10.1.20.14"})
 
-function! s:Make(bang, target)
-  function! OnStdout(id, data, event)
-    for data in a:data
-      let text = substitute(data, '\n', '', 'g')
-      if len(text) > 0
-        let m = matchlist(text, '\[ *\([0-9]\+%\)\]')
-        if len(m) > 1 && !empty(m[1])
-          let g:statusline_dict['make'] = m[1]
-        endif
-      endif
-    endfor
-  endfunction
-
-  function! OnStderr(id, data, event)
-    for data in a:data
-      let text = substitute(data, '\n', '', 'g')
-      if len(text) > 0
-        let m = matchlist(text, '\(.*\):\([0-9]\+\):\([0-9]\+\): \(.*\)')
-        if len(m) >= 5
-          let file = m[1]
-          let lnum = m[2]
-          let col = m[3]
-          let text = m[4]
-          if filereadable(file) && (stridx(text, "error:") >= 0 || stridx(text, "warning:") >= 0)
-            let item = #{filename: file, text: text, lnum: lnum, col: col}
-            call add(g:make_error_list, item)
-          endif
-        endif
-      endif
-    endfor
-  endfunction
-
-  function! OnExit(id, code, event)
-    if a:code == 0
-      echom "Make successful!"
-      exe "LspRestart"
-    else
-      echom "Make failed!"
-      if exists("g:make_error_list") && len(g:make_error_list) > 0
-        call setqflist([], ' ', #{title: "Make", items: g:make_error_list})
-        copen
-      endif
-    endif
-    silent! unlet g:make_error_list
-    silent! unlet g:statusline_dict['make']
-  endfunction
-
-  let cmd = ["/bin/bash", "-c", "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux; make " . a:target]
-  if a:bang == ""
-    let g:make_error_list = []
-    let opts = #{cwd: FugitiveWorkTree(), on_stdout: function("OnStdout"), on_stderr: function("OnStderr"), on_exit: function("OnExit")}
-    call jobstart(cmd, opts)
-  else
-    bot new
-    let id = termopen(cmd, #{cwd: FugitiveWorkTree(), on_exit: function("OnExit")})
-    call cursor("$", 1)
+function s:Obsidian05Make(bang, target)
+  const makefile = FugitivePath('Makefile')
+  if !filereadable(makefile)
+    echo "No makefile"
+    return
   endif
+
+  let env = "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux;" 
+  let make = "make -f " . makefile
+  let command = ["/bin/bash", "-c", env . make_target]
+  call Make(a:command, a:bang)
 endfunction
 
-" TODO completion?
-command! -nargs=? -bang Make call <SID>Make("<bang>", <q-args>)
+command! -nargs=? -bang -complete=customlist,MakeCompl Make call <SID>Obsidian05Make("<bang>", <q-args>)
+
+function! MakeCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+
+  const makefile = FugitivePath('Makefile')
+  if !filereadable(makefile)
+    return []
+  endif
+  let targets = MakeTargets(makefile)
+  return filter(targets, "match(v:val, '" . a:ArgLead . "') >= 0")
+endfunction
 
 "}}}
