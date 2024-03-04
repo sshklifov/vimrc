@@ -1233,9 +1233,9 @@ function s:Obsidian05Make(bang, target)
   endif
 
   let env = "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux;" 
-  let make = "make -f " . makefile
-  let command = ["/bin/bash", "-c", env . make_target]
-  call Make(a:command, a:bang)
+  let make_command = "make -f " . makefile
+  let command = ["/bin/bash", "-c", env . make_command]
+  call Make(command, a:bang)
 endfunction
 
 command! -nargs=? -bang -complete=customlist,MakeCompl Make call <SID>Obsidian05Make("<bang>", <q-args>)
