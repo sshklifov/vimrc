@@ -1167,21 +1167,24 @@ function! RemoteCompl(ArgLead, CmdLine, CursorPos)
   return systemlist(["ssh", "-o", "ConnectTimeout=1", machine, find])
 endfunction
 
-" TODO Does not work ideally yet...
-function! s:ExecuteRemote(ip_octet, exe)
-  let debug_args = #{}
-  let debug_args['ssh'] = "root@10.1.20." . a:ip_octet
+function! s:ObsidianDebug(ip_octet, exe, ...)
+  let destination = "root@10.1.20." . a:ip_octet
+  let debug_args = #{ssh: destination}
   if !empty(a:exe)
     let debug_args['exe'] = a:exe
+  endif
+  if a:0 > 0
+    let debug_args['br'] = a:1
   endif
   call s:Debug(debug_args)
 endfunction
 
-command! -nargs=? -complete=customlist,RemoteCompl Remote26 call <SID>ExecuteRemote("26", <q-args>)
-command! -nargs=? -complete=customlist,RemoteCompl Remote14 call <SID>ExecuteRemote("14", <q-args>)
-command! -nargs=1 -complete=customlist,AttachCompl Attach14 call s:Debug({"proc": <q-args>, "ssh": "root@10.1.20.14"})
+command! -nargs=? -complete=customlist,RemoteCompl Start26 call <SID>ObsidianDebug(26, <q-args>)
+command! -nargs=? -complete=customlist,RemoteCompl Start14 call <SID>ObsidianDebug(14, <q-args>)
+command! -nargs=? -complete=customlist,RemoteCompl Run26 call <SID>ObsidianDebug(26, <q-args>, <SID>GetDebugLoc())
+command! -nargs=? -complete=customlist,RemoteCompl Run14 call <SID>ObsidianDebug(14, <q-args>, <SID>GetDebugLoc())
 
-function s:Obsidian05Make(bang, target)
+function s:ObsidianMake(bang, target)
   const makefile = FugitivePath('Makefile')
   if !filereadable(makefile)
     echo "No makefile"
@@ -1194,7 +1197,7 @@ function s:Obsidian05Make(bang, target)
   call Make(command, a:bang)
 endfunction
 
-command! -nargs=? -bang -complete=customlist,MakeCompl Make call <SID>Obsidian05Make("<bang>", <q-args>)
+command! -nargs=? -bang -complete=customlist,MakeCompl Make call <SID>ObsidianMake("<bang>", <q-args>)
 
 function! MakeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
