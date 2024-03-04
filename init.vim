@@ -457,8 +457,8 @@ endfunction
 
 function! s:Review(arg)
   if exists("g:review_stack")
-    call setqflist([], ' ', #{title: "Review", items: g:review_stack[-1]})
-    copen
+    let items = g:review_stack[-1]
+    call items->ToQuickfix("Review")
     return
   endif
 
@@ -527,13 +527,11 @@ function! s:ReviewCompleteFiles(cmd_bang, pat) abort
       call s:ToggleDiff()
     endif
   endif
-  call setqflist([], ' ', #{title: "Review", items: new_items})
   call add(g:review_stack, new_items)
-
   if empty(new_items)
     echo "Review completed!"
   else
-    copen
+    call new_items->ToQuickfix("Review")
   endif
 endfunction
 
@@ -546,8 +544,8 @@ function! s:UncompleteFiles()
   endif
   if len(g:review_stack) > 1
     call remove(g:review_stack, -1)
-    call setqflist([], ' ', #{title: "Review", items: g:review_stack[-1]})
-    copen
+    let items = g:review_stack[-1]
+    call items->ToQuickfix("Review")
   end
 endfunction
 
@@ -670,15 +668,8 @@ function! ExeCompl(ArgLead, CmdLine, CursorPos)
     return []
   endif
 
-  " Apply 'smartcase' to the regex
-  if a:ArgLead =~# "[A-Z]"
-    let regex = "-regex"
-  else
-    let regex = "-iregex"
-  endif
-  let pat = ".*" . a:ArgLead . ".*"
-
-  let cmd = ["find", ".", '(', "-path", "**/.git", "-prune", "-false", "-o", regex, pat, ')']
+  let pat = "*" . a:ArgLead . "*"
+  let cmd = ["find", ".", "(", "-path", "**/.git", "-prune", "-false", "-o", "-name", pat, ")"]
   let cmd += ["-type", "f", "-executable", "-printf", "%P\n"]
   return systemlist(cmd)
 endfunction
@@ -828,10 +819,10 @@ command! -nargs=0 -bar TermDebugMessages tabnew | exe "b " . bufnr("Gdb messages
 
 """"""""""""""""""""""""""""LSP"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-command! LspStop lua vim.lsp.stop_client(vim.lsp.get_active_clients())
-command! LspProg lua print(vim.inspect(vim.lsp.util.get_progress_messages()))
+command! -nargs=0 LspStop lua vim.lsp.stop_client(vim.lsp.get_active_clients())
+command! -nargs=0 LspProg lua print(vim.inspect(vim.lsp.util.get_progress_messages()))
 
-command! -range=% For lua vim.lsp.buf.format{ range = {start= {<line1>, 0}, ["end"] = {<line2>, 0}} }
+command! -nargs=0 -range=% For lua vim.lsp.buf.format{ range = {start= {<line1>, 0}, ["end"] = {<line2>, 0}} }
 
 " Document highlight
 highlight LspReferenceText gui=underline
@@ -885,46 +876,6 @@ endfunction
 
 autocmd User LspProgressUpdate call <SID>UpdateLspProgress()
 
-" TODO move
-function! s:ItemsCompl(items, pat)
-  if a:pat !~# "[A-Z]"
-    let mpat = '\c' . a:pat
-  else
-    let mpat = '\C' . a:pat
-  endif
-
-  let compl = []
-  for item in a:items
-    let parts = split(item, "/")
-    for part in parts
-      if match(part, mpat) >= 0
-        call add(compl, part)
-      endif
-    endfor
-  endfor
-  return uniq(sort(compl))
-endfunction
-
-" TODO USE
-function! s:PatFilter(items, pat)
-  return filter(a:items, "match(v:val, '" . a:pat . "') >= 0")
-endfunction
-
-" TODO USE
-function! s:ToQuickfix(files, title)
-  let items = map(a:files, "#{filename: v:val}")
-  if len(items) <= 0
-    echo "No entries"
-  else
-    call setqflist([], ' ', #{title: a:title, items: items})
-    copen
-    if len(items) == 1
-      cc
-    endif
-  endif
-  copen
-endfunction
-
 function! s:GetIndex()
   let source = ["c", "cc", "cp", "cxx", "cpp", "CPP", "c++", "C"]
   let header = ["h", "hh", "H", "hp", "hxx", "hpp", "HPP", "h++", "tcc"]
@@ -937,10 +888,21 @@ function! IndexCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return s:ItemsCompl(s:GetIndex(), a:ArgLead)
+  let compl = []
+  for item in s:GetIndex()
+    let parts = split(item, "/")
+    for part in parts
+      if stridx(part, a:ArgLead) >= 0
+        call add(compl, part)
+      endif
+    endfor
+  endfor
+  let res = uniq(sort(compl))
+  let exclude = split(FugitiveWorkTree(), "/")
+  return filter(res, "index(exclude, v:val) < 0")
 endfunction
 
-command! -nargs=1 -complete=customlist,IndexCompl Index call s:GetIndex()->s:PatFilter(<q-args>)->s:ToQuickfix('Index')
+command! -nargs=1 -complete=customlist,IndexCompl Index call s:GetIndex()->s:PatFilter(<q-args>)->ToQuickfix('Index')
 
 function! TypeHierarchyHandler(res, encoding)
   let items = []
@@ -958,8 +920,7 @@ function! TypeHierarchyHandler(res, encoding)
     call cursor(line, col)
   elseif len(items) > 1
     let items = v:lua.vim.lsp.util.locations_to_items(items, a:encoding)
-    call setqflist([], ' ', #{title: 'Hierarchy', items: items})
-    copen
+    call items->ToQuickfix("Hierarchy")
   endif
 endfunction
 
@@ -995,8 +956,7 @@ function! AstHandler(buf, kinds, res)
       endif
     endwhile
     call sort(items, {a, b -> a.lnum - b.lnum})
-    call setqflist([], ' ', #{title: 'AST', items: items})
-    copen
+    call items->ToQuickfix("AST")
   endif
 endfunction
 
@@ -1011,8 +971,7 @@ function! ReferenceContainerHandler(res)
         \ col: v:val.range.start.character + 1,
         \ text: v:val.containerName}")
   call sort(items, {a, b -> a.lnum - b.lnum})
-  call setqflist([], ' ', #{title: "References", items: items})
-  copen
+  call items->ToQuickfix("References")
 endfunction
 
 function! s:LspRequestSync(buf, method, params)
@@ -1069,8 +1028,7 @@ function! s:Instances()
     echo "No instances"
   else
     call sort(items, {a, b -> a.lnum - b.lnum})
-    call setqflist([], ' ', #{title: "Instances", items: items})
-    copen
+    call items->ToQuickfix("Instances")
   endif
 endfunction
 
@@ -1204,9 +1162,7 @@ function! RemoteCompl(ArgLead, CmdLine, CursorPos)
     return []
   endif
 
-  " No 'iregex' on remote device
-  let pat = ".*" . a:ArgLead . ".*"
-  let find = "find /home/root/Debug -regex '" . pat . "' -type f -executable"
+  let find = "find /home/root/Debug -name " . shellescape(a:ArgLead) . " -type f -executable"
   let machine = "root@10.1.20." . a:CmdLine[6] . a:CmdLine[7]
   return systemlist(["ssh", "-o", "ConnectTimeout=1", machine, find])
 endfunction
@@ -1250,7 +1206,7 @@ function! MakeCompl(ArgLead, CmdLine, CursorPos)
     return []
   endif
   let targets = MakeTargets(makefile)
-  return filter(targets, "match(v:val, '" . a:ArgLead . "') >= 0")
+  return filter(targets, "stridx(v:val, '" . a:ArgLead . "') >= 0")
 endfunction
 
 "}}}
