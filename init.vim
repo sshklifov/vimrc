@@ -458,7 +458,7 @@ endfunction
 function! s:Review(arg)
   if exists("g:review_stack")
     let items = g:review_stack[-1]
-    call items->ToQuickfix("Review")
+    call ToQuickfix(items, "Review")
     return
   endif
 
@@ -531,7 +531,7 @@ function! s:ReviewCompleteFiles(cmd_bang, pat) abort
   if empty(new_items)
     echo "Review completed!"
   else
-    call new_items->ToQuickfix("Review")
+    call ToQuickfix(new_items, "Review")
   endif
 endfunction
 
@@ -545,7 +545,7 @@ function! s:UncompleteFiles()
   if len(g:review_stack) > 1
     call remove(g:review_stack, -1)
     let items = g:review_stack[-1]
-    call items->ToQuickfix("Review")
+    call ToQuickfix(items, "Review")
   end
 endfunction
 
@@ -722,6 +722,10 @@ function! s:Debug(args)
     let a:args["proc"] = pids[0]
   endif
 
+  " Clear old autocmds
+  autocmd! User TermdebugStopPre
+  autocmd! User TermdebugStartPost
+  " Install new autocmds
   autocmd User TermdebugStopPre call s:DebugStopPre()
   exe "autocmd User TermdebugStartPost call s:DebugStartPost(" . string(a:args) . ")"
 
@@ -781,16 +785,16 @@ function! s:DebugStartPost(args)
 endfunction
 
 function! s:DebugStopPre()
-  autocmd! User TermdebugStopPre
-  autocmd! User TermdebugStartPost
-  execute "Source" | setlocal so=4
+  if exists(":Source")
+    execute "Source" | setlocal so=4
+  endif
 
-  nunmap <silent> <leader>v
-  vunmap <silent> <leader>v
-  nunmap <silent> <leader>br
-  nunmap <silent> <leader>tbr
-  nunmap <silent> <leader>unt
-  nunmap <silent> <leader>pc
+  silent! nunmap <silent> <leader>v
+  silent! vunmap <silent> <leader>v
+  silent! nunmap <silent> <leader>br
+  silent! nunmap <silent> <leader>tbr
+  silent! nunmap <silent> <leader>unt
+  silent! nunmap <silent> <leader>pc
 endfunction
 
 function! s:GetDebugLoc()
@@ -920,7 +924,7 @@ function! TypeHierarchyHandler(res, encoding)
     call cursor(line, col)
   elseif len(items) > 1
     let items = v:lua.vim.lsp.util.locations_to_items(items, a:encoding)
-    call items->ToQuickfix("Hierarchy")
+    call ToQuickfix(items, "Hierarchy")
   endif
 endfunction
 
@@ -956,7 +960,7 @@ function! AstHandler(buf, kinds, res)
       endif
     endwhile
     call sort(items, {a, b -> a.lnum - b.lnum})
-    call items->ToQuickfix("AST")
+    call ToQuickfix(items, "AST")
   endif
 endfunction
 
@@ -971,7 +975,7 @@ function! ReferenceContainerHandler(res)
         \ col: v:val.range.start.character + 1,
         \ text: v:val.containerName}")
   call sort(items, {a, b -> a.lnum - b.lnum})
-  call items->ToQuickfix("References")
+  call ToQuickfix(items, "References")
 endfunction
 
 function! s:LspRequestSync(buf, method, params)
@@ -1028,7 +1032,7 @@ function! s:Instances()
     echo "No instances"
   else
     call sort(items, {a, b -> a.lnum - b.lnum})
-    call items->ToQuickfix("Instances")
+    call ToQuickfix(items, "Instances")
   endif
 endfunction
 
@@ -1162,13 +1166,14 @@ function! RemoteCompl(ArgLead, CmdLine, CursorPos)
     return []
   endif
 
-  let find = "find /home/root/Debug -name " . shellescape(a:ArgLead) . " -type f -executable"
-  let machine = "root@10.1.20." . a:CmdLine[6] . a:CmdLine[7]
+  let pat = "*" . a:ArgLead . "*"
+  let find = "find /home/root/Debug -name " . shellescape(pat) . " -type f -executable"
+  let machine = "root@10.1.20." . a:CmdLine[5] . a:CmdLine[6] " TODO
   return systemlist(["ssh", "-o", "ConnectTimeout=1", machine, find])
 endfunction
 
 function! s:ObsidianDebug(ip_octet, exe, ...)
-  let destination = "root@10.1.20." . a:ip_octet
+  let destination = "root@10.1.20." . string(a:ip_octet)
   let debug_args = #{ssh: destination}
   if !empty(a:exe)
     let debug_args['exe'] = a:exe
