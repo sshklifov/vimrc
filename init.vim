@@ -112,7 +112,6 @@ cabbr Gd lefta Gdiffsplit
 cabbr Gl Gclog!
 cabbr Gb Git blame
 cabbr Gdt Git! difftool
-cabbr Gmt Git mergetool
 
 " Git commit style settings
 autocmd FileType gitcommit set spell
@@ -121,23 +120,15 @@ autocmd FileType gitcommit set tw=90
 " Capture <Esc> in termal mode
 tnoremap <Esc> <C-\><C-n>
 
-" Indentation settings (will be overriden by vim-sleuth)
-set expandtab
-set shiftwidth=4
-set tabstop=4
-set softtabstop=0
-set cinoptions=L0,l1,b0,g1,t0,(s,U1,N-s
-
 " Display line numbers
 set number
 set relativenumber
-set cc=101
 
 " Smart searching with '/'
 set ignorecase
 set smartcase
 set hlsearch
-nnoremap <silent> <Space> :nohlsearch <cr>
+nnoremap <silent> <Space> :nohlsearch<cr>
 
 " Typos
 command! -bang Q q<bang>
@@ -406,11 +397,11 @@ nmap <leader>sp :setlocal invspell<CR>
 function! s:SwitchToBranch(arg)
   let dict = FugitiveExecute(["status", "--porcelain"])
   if dict['exit_status'] != 0
-    echo "Are you inside a git repository?"
+    echo "Not inside repo"
     return
   endif
   if len(dict) > 1 && dict['stdout'][0] != ''
-    echo "Is repo dirty?"
+    echo "Dirty repo detected"
     return
   endif
 
@@ -419,7 +410,7 @@ function! s:SwitchToBranch(arg)
     echo "Failed to checkout " . a:arg
     return
   endif
-
+  " Rebuild for an up-to-date version of compile_commands.json
   exe "Make!"
 endfunction
 
@@ -464,20 +455,31 @@ function! s:Review(arg)
 
   " Run a test command
   if FugitiveExecute(["status"])['exit_status'] != 0
-    echo "Review failed, are you inside a git repository?"
+    echo "Not inside repo"
     return
   endif
+  " Auto detect mainline if not passed. Either 'master' or 'main'
+  if empty(a:arg)
+    let branches = s:GetRefs(['refs/heads'], 'ma')
+    if index(branches, 'master') >= 0
+      let main = 'master'
+    elseif index(branches, 'main') >= 0
+      let main = 'main'
+    else
+      echo "Failed to determine mainline. Pass it as argument"
+      return
+    endif
+  endif
   " See if mainline exists
-  let main = empty(a:arg) ? "main" : a:arg
   if FugitiveExecute(["show", main])['exit_status'] != 0
-    echo "Review failed, does the mainline exist?"
+    echo "Unknown ref to git: " . main
     return
   endif
 
   let range = main . "..HEAD"
   let dict = FugitiveExecute(["log", range, "--pretty=format:%H"])
   if dict['exit_status'] != 0
-    echo "Review failed, have you checked out " . main . "?"
+    echo "Revision range failed, aborting review"
     return
   endif
 
@@ -493,7 +495,7 @@ function! s:Review(arg)
     endif
   endif
   if !exists('bpoint')
-    echo "Could not determine branch point, is the mainline up to date?"
+    echo "Could not determine branch point, aborting review"
     return
   endif
 
@@ -516,22 +518,23 @@ function! s:ReviewCompleteFiles(cmd_bang, pat) abort
 
   let new_items = copy(g:review_stack[-1])
   if !empty(a:pat)
-    let comp = a:cmd_bang == "!" ? "!=" : "=="
-    let new_items = filter(new_items, "match(bufname(v:val.bufnr), '" . a:pat . "') " . comp . " -1")
+    let match_idx = printf("match(bufname(v:val.bufnr), \'%s\')", a:pat)
+    let comp = a:cmd_bang == "!" ? " != " : " == "
+    let new_items = filter(new_items, match_idx . comp . "-1")
   else
-    let comp = a:cmd_bang == "!" ? "== " : "!= "
+    let comp = a:cmd_bang == "!" ? " == " : " != "
     let bufnr = bufnr(FugitiveReal(bufname("%")))
-    let new_items = filter(new_items, "v:val.bufnr " . comp . bufnr)
-    " Close diff
-    if s:DiffFugitiveWinid() >= 0
-      call s:ToggleDiff()
-    endif
+    let new_items = filter(new_items, "v:val.bufnr" . comp . bufnr)
   endif
   call add(g:review_stack, new_items)
   if empty(new_items)
     echo "Review completed!"
   else
     call ToQuickfix(new_items, "Review")
+  endif
+  " Close diff
+  if s:DiffFugitiveWinid() >= 0
+    call s:ToggleDiff()
   endif
 endfunction
 
@@ -817,8 +820,6 @@ function! s:GetRangeExpr()
   let expr = join(lines, "\n")
   return expr
 endfunction
-
-command! -nargs=0 -bar TermDebugMessages tabnew | exe "b " . bufnr("Gdb messages")
 "}}}
 
 """"""""""""""""""""""""""""LSP"""""""""""""""""""""""""""" {{{
@@ -906,7 +907,12 @@ function! IndexCompl(ArgLead, CmdLine, CursorPos)
   return filter(res, "index(exclude, v:val) < 0")
 endfunction
 
-command! -nargs=1 -complete=customlist,IndexCompl Index call s:GetIndex()->s:PatFilter(<q-args>)->ToQuickfix('Index')
+" TODO place somewhere
+function Filter(list, args)
+  return filter(a:list, "stridx(v:val, a:args) >= 0")
+endfunction
+
+command! -nargs=? -complete=customlist,IndexCompl Index call s:GetIndex()->Filter(<q-args>)->ToQuickfix('Index')
 
 function! TypeHierarchyHandler(res, encoding)
   let items = []
@@ -1161,14 +1167,15 @@ endfunction
 
 nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
 
-function! RemoteCompl(ArgLead, CmdLine, CursorPos)
+function! RemoteExeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
 
   let pat = "*" . a:ArgLead . "*"
   let find = "find /home/root/Debug -name " . shellescape(pat) . " -type f -executable"
-  let machine = "root@10.1.20." . a:CmdLine[5] . a:CmdLine[6] " TODO
+  let ip_octet = matchlist(a:CmdLine, "[0-9][0-9]")[0]
+  let machine = "root@10.1.20." . ip_octet
   return systemlist(["ssh", "-o", "ConnectTimeout=1", machine, find])
 endfunction
 
@@ -1184,10 +1191,19 @@ function! s:ObsidianDebug(ip_octet, exe, ...)
   call s:Debug(debug_args)
 endfunction
 
-command! -nargs=? -complete=customlist,RemoteCompl Start26 call <SID>ObsidianDebug(26, <q-args>)
-command! -nargs=? -complete=customlist,RemoteCompl Start14 call <SID>ObsidianDebug(14, <q-args>)
-command! -nargs=? -complete=customlist,RemoteCompl Run26 call <SID>ObsidianDebug(26, <q-args>, <SID>GetDebugLoc())
-command! -nargs=? -complete=customlist,RemoteCompl Run14 call <SID>ObsidianDebug(14, <q-args>, <SID>GetDebugLoc())
+command! -nargs=? -complete=customlist,RemoteExeCompl Start26 call <SID>ObsidianDebug(26, <q-args>)
+command! -nargs=? -complete=customlist,RemoteExeCompl Start14 call <SID>ObsidianDebug(14, <q-args>)
+command! -nargs=? -complete=customlist,RemoteExeCompl Run26 call <SID>ObsidianDebug(26, <q-args>, <SID>GetDebugLoc())
+command! -nargs=? -complete=customlist,RemoteExeCompl Run14 call <SID>ObsidianDebug(14, <q-args>, <SID>GetDebugLoc())
+
+function! s:ObsidianAttach(ip_octet)
+  let machine = "root@10.1.20." . string(ip_octet)
+  " TODO pid is wrong 100%
+  let pid = systemlist(["ssh", "-o", "ConnectTimeout=1", machine, "pgrep obsidian-video"])
+  call s:Debug(#{ssh: machine, proc: pid})
+endfunction
+
+command! -nargs=0 Attach14 call <SID>ObsidianAttach(14)
 
 function s:ObsidianMake(bang, target)
   const makefile = FugitivePath('Makefile')
@@ -1216,5 +1232,14 @@ function! MakeCompl(ArgLead, CmdLine, CursorPos)
   let targets = MakeTargets(makefile)
   return filter(targets, "stridx(v:val, '" . a:ArgLead . "') >= 0")
 endfunction
+
+" Indentation settings (will be overriden by vim-sleuth)
+set expandtab
+set shiftwidth=2
+set tabstop=2
+set softtabstop=0
+set cinoptions=L0,l1,b0,g1,t0,(s,U1,N-s
+" Max line width
+set cc=101
 
 "}}}
