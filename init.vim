@@ -1,4 +1,5 @@
 " vim: set sw=2 ts=2 sts=2 foldmethod=marker:
+" TODO funcref
 
 call plug#begin()
 
@@ -156,7 +157,7 @@ cnoremap <expr> <Down> pumvisible() ? "\<C-n>" : "\<Down>"
 cnoremap <expr> <Right> pumvisible() ? "\<Down>" : "\<Right>"
 
 set scrolloff=4
-set noautoread
+set autoread
 set splitright
 set nottimeout
 set notimeout
@@ -449,7 +450,7 @@ function! OriginCompl(ArgLead, CmdLine, CursorPos)
   return s:GetRefs(['refs/remotes/origin'], a:ArgLead)
 endfunction
 
-function! s:Review(arg)
+function! s:Review(bang, arg)
   if exists("g:review_stack")
     let items = g:review_stack[-1]
     call ToQuickfix(items, "Review")
@@ -462,12 +463,13 @@ function! s:Review(arg)
     return
   endif
   " Auto detect mainline if not passed. Either 'master' or 'main'
-  if empty(a:arg)
-    let branches = s:GetRefs(['refs/heads'], 'ma')
-    if index(branches, 'master') >= 0
-      let main = 'master'
-    elseif index(branches, 'main') >= 0
-      let main = 'main'
+  let main = a:arg
+  if empty(main)
+    let branches = s:GetRefs(['refs/remotes'], 'ma')
+    if index(branches, 'origin/master') >= 0
+      let main = 'origin/master'
+    elseif index(branches, 'origin/main') >= 0
+      let main = 'origin/main'
     else
       echo "Failed to determine mainline. Pass it as argument"
       return
@@ -479,21 +481,25 @@ function! s:Review(arg)
     return
   endif
 
-  let range = main . "..HEAD"
-  let dict = FugitiveExecute(["log", range, "--pretty=format:%H"])
-  if dict['exit_status'] != 0
-    echo "Revision range failed, aborting review"
-    return
-  endif
-
-  let commit = dict['stdout'][-1]
-  let dict = FugitiveExecute(["log", "--format=%B", "-n", "1", commit])
-  if dict['exit_status'] == 0
-    let message = dict['stdout'][0]
-    if message !~# ".*SW-[0-9][0-9][0-9][0-9].*"
-      let dict = FugitiveExecute(["rev-parse", commit . "~1"])
-      if dict['exit_status'] == 0
-        let bpoint = dict['stdout'][0]
+  if a:bang == "!"
+    " Force the branchpoint to be at the mainline. This is necessary when the below commands fail
+    let bpoint = main
+  else
+    let range = main . "..HEAD"
+    let dict = FugitiveExecute(["log", range, "--pretty=format:%H"])
+    if dict['exit_status'] != 0
+      echo "Revision range failed, aborting review"
+      return
+    endif
+    let commit = dict['stdout'][-1]
+    let dict = FugitiveExecute(["log", "--format=%B", "-n", "1", commit])
+    if dict['exit_status'] == 0
+      let message = dict['stdout'][0]
+      if message !~# ".*SW-[0-9][0-9][0-9][0-9].*"
+        let dict = FugitiveExecute(["rev-parse", commit . "~1"])
+        if dict['exit_status'] == 0
+          let bpoint = dict['stdout'][0]
+        endif
       endif
     endif
   endif
@@ -511,7 +517,7 @@ function! s:Review(arg)
   let g:review_stack = [getqflist()]
 endfunction
 
-command! -nargs=? -complete=customlist,OriginCompl Review call <SID>Review(<q-args>)
+command! -nargs=? -bang -complete=customlist,OriginCompl Review call <SID>Review("<bang>", <q-args>)
 
 function! s:ReviewCompleteFiles(cmd_bang, pat) abort
   if !exists("g:review_stack")
