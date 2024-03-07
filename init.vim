@@ -524,6 +524,8 @@ function! s:ReviewCompleteFiles(cmd_bang, pat) abort
     let match_idx = printf("match(bufname(v:val.bufnr), \'%s\')", a:pat)
     let comp = a:cmd_bang == "!" ? " != " : " == "
     let new_items = filter(new_items, match_idx . comp . "-1")
+    let n = len(g:review_stack[-1]) - len(new_items)
+    echo "Completed " . n . " files"
   else
     let comp = a:cmd_bang == "!" ? " == " : " != "
     let bufnr = bufnr(FugitiveReal(bufname("%")))
