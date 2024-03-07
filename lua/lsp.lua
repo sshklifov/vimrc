@@ -91,7 +91,6 @@ local OnAttach = function(client, bufnr)
 
   user_command("Base", RequestBaseClass, opts)
   user_command("Derived", RequestDerivedClass, opts)
-  user_command("Switch", RequestSwitchSourceHeader, opts)
   user_command("Reference", RequestReferenceContainer, opts)
 
   -- Autocommands for highlight
