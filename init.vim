@@ -142,6 +142,9 @@ nnoremap <C-w>t <C-w>T
 let mapleader = "\\"
 autocmd SwapExists * let v:swapchoice = "e"
 
+" Disable mouse
+set mouse=
+
 " Command completion
 set wildchar=9
 set wildcharm=9
