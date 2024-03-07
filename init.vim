@@ -538,7 +538,17 @@ function! s:ReviewCompleteFiles(cmd_bang, pat) abort
   endif
 endfunction
 
-command! -bang -nargs=? -complete=customlist,BufferCompl Complete  call <SID>ReviewCompleteFiles('<bang>', <q-args>)
+function CompleteCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  if !exists('g:review_stack')
+    return []
+  endif
+  return SplitItems(g:review_stack[-1], a:ArgLead)
+endfunction
+
+command! -bang -nargs=? -complete=customlist,CompleteCompl Complete  call <SID>ReviewCompleteFiles('<bang>', <q-args>)
 
 function! s:UncompleteFiles()
   if !exists("g:review_stack")
@@ -886,33 +896,17 @@ function! s:GetIndex()
   let header = ["h", "hh", "H", "hp", "hxx", "hpp", "HPP", "h++", "tcc"]
   let regex = '.*\.\(' . join(source, '\|') . '\|' . join(header, '\|') . '\)'
   let files = systemlist(["find", FugitiveWorkTree(), "-regex", regex])
-  return files
+  return SearchFilter(files)
 endfunction
 
 function! IndexCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  let compl = []
-  for item in s:GetIndex()
-    let parts = split(item, "/")
-    for part in parts
-      if stridx(part, a:ArgLead) >= 0
-        call add(compl, part)
-      endif
-    endfor
-  endfor
-  let res = uniq(sort(compl))
-  let exclude = split(FugitiveWorkTree(), "/")
-  return filter(res, "index(exclude, v:val) < 0")
+  return s:GetIndex()->SplitItems(a:ArgLead)
 endfunction
 
-" TODO place somewhere
-function Filter(list, args)
-  return filter(a:list, "stridx(v:val, a:args) >= 0")
-endfunction
-
-command! -nargs=? -complete=customlist,IndexCompl Index call s:GetIndex()->Filter(<q-args>)->ToQuickfix('Index')
+command! -nargs=? -complete=customlist,IndexCompl Index call s:GetIndex()->ArgFilter(<q-args>)->ToQuickfix('Index')
 
 function! TypeHierarchyHandler(res, encoding)
   let items = []
