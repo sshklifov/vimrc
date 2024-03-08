@@ -1,5 +1,4 @@
 " vim: set sw=2 ts=2 sts=2 foldmethod=marker:
-" TODO funcref
 
 call plug#begin()
 
@@ -882,7 +881,7 @@ function! s:UpdateLspProgress()
     return [str2nr(partFiles[0]), str2nr(partFiles[1])]
   endfunction
 
-  let serverProgress = map(serverResponses, function("GetServerProgress"))
+  let serverProgress = map(serverResponses, funcref("GetServerProgress"))
 
   let totalFiles = 0
   let totalDone = 0
