@@ -1202,10 +1202,15 @@ command! -nargs=? -complete=customlist,RemoteExeCompl Run26 call <SID>ObsidianDe
 command! -nargs=? -complete=customlist,RemoteExeCompl Run14 call <SID>ObsidianDebug(14, <q-args>, <SID>GetDebugLoc())
 
 function! s:ObsidianAttach(ip_octet)
-  let machine = "root@10.1.20." . string(ip_octet)
-  " TODO pid is wrong 100%
+  let machine = "root@10.1.20." . string(a:ip_octet)
   let pid = systemlist(["ssh", "-o", "ConnectTimeout=1", machine, "pgrep obsidian-video"])
-  call s:Debug(#{ssh: machine, proc: pid})
+  if len(pid) > 1
+    echo "Multiple instances of obsidian video"
+  elseif len(pid) < 1
+    echo "Obsidian video is not running"
+  else
+    call s:Debug(#{ssh: machine, proc: pid[0]})
+  endif
 endfunction
 
 command! -nargs=0 Attach14 call <SID>ObsidianAttach(14)
