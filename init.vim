@@ -1215,14 +1215,14 @@ endfunction
 command! -nargs=0 Attach14 call <SID>ObsidianAttach(14)
 
 function s:ObsidianMake(bang, target)
-  const makefile = FugitivePath('Makefile')
+  const makefile = FugitiveFind('Makefile')
   if !filereadable(makefile)
     echo "No makefile"
     return
   endif
 
   let env = "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux;" 
-  let make_command = "make -f " . makefile
+  let make_command = "make -f " . makefile . " " . a:target
   let command = ["/bin/bash", "-c", env . make_command]
   call Make(command, a:bang)
 endfunction
@@ -1234,7 +1234,7 @@ function! MakeCompl(ArgLead, CmdLine, CursorPos)
     return []
   endif
 
-  const makefile = FugitivePath('Makefile')
+  const makefile = FugitiveFind('Makefile')
   if !filereadable(makefile)
     return []
   endif
