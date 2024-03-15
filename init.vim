@@ -922,10 +922,14 @@ endfunction
 autocmd User LspProgressUpdate call <SID>UpdateLspProgress()
 
 function! s:GetIndex()
+  let dir = FugitiveWorkTree()
+  if !isdirectory(dir)
+    return []
+  endif
   let source = ["c", "cc", "cp", "cxx", "cpp", "CPP", "c++", "C"]
   let header = ["h", "hh", "H", "hp", "hxx", "hpp", "HPP", "h++", "tcc"]
   let regex = '.*\.\(' . join(source, '\|') . '\|' . join(header, '\|') . '\)'
-  let files = systemlist(["find", FugitiveWorkTree(), "-regex", regex])
+  let files = systemlist(["find", dir, "-regex", regex])
   return SearchFilter(files)
 endfunction
 
