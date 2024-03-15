@@ -422,8 +422,7 @@ function! s:GetRefs(ref_dirs, arg)
   for dir in dirs
     if isdirectory(dir)
       let pat = dir . ".*" . a:arg . ".*"
-      let cmd = ["find", dir, "-type", "f", "-regex", pat, "-printf", "%P\n"]
-      let result += systemlist(cmd)
+      let result += Find(dir, "-type", "f", "-regex", pat, "-printf", "%P\n")
     endif
   endfor
   return uniq(sort(result))
@@ -633,7 +632,8 @@ function! s:OpenSource()
   endfor
 
   " Default to search in root of workspace
-  call FindInQuickfix(FugitiveWorkTree(), expand("%:t:r") . ".c")
+  let regex = ".*" . expand("%:t:r") . "\\.c.*"
+  call QuickFind(FugitiveWorkTree(), "-regex", regex)
 endfunction
 
 function! s:OpenHeader()
@@ -653,7 +653,8 @@ function! s:OpenHeader()
   endfor
 
   " Default to search in root of workspace
-  call FindInQuickfix(FugitiveWorkTree(), expand("%:t:r") . ".h")
+  let regex = ".*" . expand("%:t:r") . "\\.h.*"
+  call QuickFind(FugitiveWorkTree(), "-regex", regex)
 endfunction
 
 nmap <silent> <leader>cpp :call <SID>OpenSource()<CR>
@@ -709,6 +710,7 @@ function! ExeCompl(ArgLead, CmdLine, CursorPos)
     return []
   endif
 
+  " Can't use Find() since it ignores the build folder
   let pat = "*" . a:ArgLead . "*"
   let cmd = ["find", ".", "(", "-path", "**/.git", "-prune", "-false", "-o", "-name", pat, ")"]
   let cmd += ["-type", "f", "-executable", "-printf", "%P\n"]
