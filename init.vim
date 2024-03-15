@@ -105,8 +105,8 @@ set diffopt+=vertical
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 " Open vimrc quick (muy importante)
-nnoremap <leader>ev :e ~/.config/nvim/init.vim<CR>
-nnoremap <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
+nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
+nnoremap <silent> <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
 
 cabbr Gd lefta Gdiffsplit
 cabbr Gl Gclog!
