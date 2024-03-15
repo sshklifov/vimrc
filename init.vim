@@ -923,6 +923,13 @@ endfunction
 
 autocmd User LspProgressUpdate call <SID>UpdateLspProgress()
 
+function! FindCompl(ArgLead, CmdLine, CursorPos) abort
+  let cmd = substitute(a:CmdLine[:a:CursorPos-1], 'Find', 'find', '')
+  return CmdCompl(cmd)
+endfunction
+
+command! -nargs=+ -complete=customlist,FindCompl Find call QuickFind(<f-args>)
+
 function! s:GetIndex()
   let dir = FugitiveWorkTree()
   if !isdirectory(dir)
@@ -1221,8 +1228,7 @@ function! MakeCompl(ArgLead, CmdLine, CursorPos)
   if !filereadable(makefile)
     return []
   endif
-  let targets = MakeTargets(makefile)
-  return filter(targets, "stridx(v:val, '" . a:ArgLead . "') >= 0")
+  return CmdCompl("make -f " . makefile)->ArgFilter(a:ArgLead)
 endfunction
 
 function! RemoteExeCompl(ArgLead, CmdLine, CursorPos)
@@ -1407,12 +1413,12 @@ endfunction
 function s:InstallRemoteCommands()
   for key in keys(g:remote_map)
     let remote = g:remote_map[key]
-    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start%s call <SID>RemoteDebug('%s', <q-args>)", key, remote)
-    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run%s call <SID>RemoteDebug('%s', <q-args>, <SID>GetDebugLoc())", key, remote)
-    exe printf("command! -nargs=1 Attach%s call <SID>RemoteAttach('%s', <q-args>)", key, remote)
-    exe printf("command! -nargs=? -bang -complete=file Sync%s call <SID>RemoteSync('<bang>', <q-args>, '%s')", key, remote)
-    exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs%s call <SID>Sshfs('%s', <q-args>)", key, remote)
-    exe printf("command! -nargs=0 Ssh%s call <SID>SshTerm('%s')", key, remote)
+    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start%s call <SID>RemoteDebug(remote, <q-args>)", key)
+    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run%s call <SID>RemoteDebug(remote, <q-args>, <SID>GetDebugLoc())", key)
+    exe printf("command! -nargs=1 Attach%s call <SID>RemoteAttach(remote, <q-args>)", key)
+    exe printf("command! -nargs=? -bang -complete=file Sync%s call <SID>RemoteSync('<bang>', <q-args>, remote)", key)
+    exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs%s call <SID>Sshfs(remote, <q-args>)", key)
+    exe printf("command! -nargs=0 Ssh%s call <SID>SshTerm(remote)", key)
   endfor
 endfunction
 
