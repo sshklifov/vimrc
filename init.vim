@@ -1176,7 +1176,59 @@ endfunction
 
 command! -nargs=0 Mfun call <SID>Member(["CXXMethod", "CXXConstructor", "CXXDestructor"])
 command! -nargs=0 Mvar call <SID>Member(["Field"])
+"}}}
 
+""""""""""""""""""""""""""""REMOTE"""""""""""""""""""""""""""" {{{
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function! s:RemoteDebug(host, exe, ...)
+  let debug_args = #{ssh: a:host}
+  if !empty(a:exe)
+    let debug_args['exe'] = a:exe
+  endif
+  if a:0 > 0
+    let debug_args['br'] = a:1
+  endif
+  call s:Debug(debug_args)
+endfunction
+
+function! s:RemoteAttach(host, proc)
+  let pid = systemlist(["ssh", "-o", "ConnectTimeout=1", a:host, "pgrep " . a:proc])
+  if len(pid) > 1
+    echo "Multiple instances of " . a:proc
+  elseif len(pid) < 1
+    echo a:proc . " is not running"
+  else
+    call s:Debug(#{ssh: machine, proc: pid[0]})
+  endif
+endfunction
+
+function! s:SshTerm(remote)
+  tabnew
+  startinsert
+  let id = termopen(["ssh", a:remote])
+endfunction
+
+function! s:Sshfs(remote, args)
+  silent exe "edit scp://" . a:remote . "/" . a:args
+endfunction
+
+function! SshfsCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+
+  let host = s:GetHostFromCommand('Sshfs', a:CmdLine)
+  if empty(a:ArgLead)
+    return systemlist(["ssh", host, "find / -maxdepth 1"])
+  else
+    let dirname = fnamemodify(a:ArgLead, ':h')
+    let remote_dirs = systemlist(["ssh", host, "find " . dirname . " -maxdepth 1 -type d"])
+    let remote_dirs = map(remote_dirs, 'v:val . "/"')
+    let remote_files = systemlist(["ssh", host, "find " . dirname . " -maxdepth 1 -type f"])
+    let total = remote_dirs + remote_files
+    return filter(total, 'stridx(v:val, a:ArgLead) == 0')
+  endif
+endfunction
 "}}}
 
 """"""""""""""""""""""""""""Context dependent"""""""""""""""""""""""""""" {{{
@@ -1202,18 +1254,21 @@ endfunction
 nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
 
 function s:ObsidianMake(...)
-  const makefile = FugitiveFind('Makefile')
-  if !filereadable(makefile)
-    echo "No makefile"
+  let repo = split(FugitiveWorkTree(), "/")[-1]
+  let obsidian_repos = ["obsidian-video", "libalcatraz", "mpp"]
+  if index(obsidian_repos, repo) < 0
+    echo "Unsupported repo: " . repo
     return
   endif
 
-  let target = get(a:, 1, "")
+  let type = get(a:, 1, "Debug")
   let bang = get(a:, 2, "")
 
   let env = "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux"
-  let cmd = "make -f " . makefile . " " . target
-  let command = ["/bin/bash", "-c", env . ';' . cmd]
+  let cmake = printf("cmake -B %s -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=%s", type, type)
+  let build = printf("cmake --build %s", type)
+  let cmds = [env, cmake, build]
+  let command = ["/bin/bash", "-c", join(cmds, ';')]
   return Make(command, bang)
 endfunction
 
@@ -1223,12 +1278,8 @@ function! MakeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-
-  const makefile = FugitiveFind('Makefile')
-  if !filereadable(makefile)
-    return []
-  endif
-  return CmdCompl("make -f " . makefile)->ArgFilter(a:ArgLead)
+  let items = ["Debug", "Release"]
+  return items->ArgFilter(a:ArgLead)
 endfunction
 
 function! RemoteExeCompl(ArgLead, CmdLine, CursorPos)
@@ -1244,28 +1295,6 @@ function! RemoteExeCompl(ArgLead, CmdLine, CursorPos)
     let host = s:GetHostFromCommand('Run', a:CmdLine)
   endif
   return systemlist(["ssh", "-o", "ConnectTimeout=1", host, find])
-endfunction
-
-function! s:RemoteDebug(host, exe, ...)
-  let debug_args = #{ssh: a:host}
-  if !empty(a:exe)
-    let debug_args['exe'] = a:exe
-  endif
-  if a:0 > 0
-    let debug_args['br'] = a:1
-  endif
-  call s:Debug(debug_args)
-endfunction
-
-function! s:RemoteAttach(host, proc)
-  let pid = systemlist(["ssh", "-o", "ConnectTimeout=1", a:host, "pgrep " . a:proc])
-  if len(pid) > 1
-    echo "Multiple instances of " . a:proc
-  elseif len(pid) < 1
-    echo a:proc . " is not running"
-  else
-    call s:Debug(#{ssh: machine, proc: pid[0]})
-  endif
 endfunction
 
 function! s:RemoteSync(bang, arg, host)
@@ -1290,7 +1319,7 @@ function! s:RemoteSync(bang, arg, host)
     let g:statusline_dict['sync'] = ''
   endfunction
 
-  let dir = empty(a:arg) ? FugitiveFind("Debug") : a:arg
+  let dir = empty(a:arg) ? FugitiveFind("Debug") : fnamemodify(a:arg, ":p")
   if !isdirectory(dir) && !filereadable(dir)
     echo "Not found: " . dir
     return
@@ -1315,36 +1344,6 @@ function! s:RemoteSync(bang, arg, host)
   endif
 endfunction
 
-function! s:SshTerm(remote)
-  tabnew
-  startinsert
-  let id = termopen(["ssh", a:remote])
-  call chansend(id, "cd /home/root\n")
-  call chansend(id, "clear\n")
-endfunction
-
-function! s:Sshfs(remote, args)
-  silent exe "edit scp://" . a:remote . "/" . a:args
-endfunction
-
-function! SshfsCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-
-  let host = s:GetHostFromCommand('Sshfs', a:CmdLine)
-  if empty(a:ArgLead)
-    return systemlist(["ssh", host, "find / -maxdepth 1"])
-  else
-    let dirname = fnamemodify(a:ArgLead, ':h')
-    let remote_dirs = systemlist(["ssh", host, "find " . dirname . " -maxdepth 1 -type d"])
-    let remote_dirs = map(remote_dirs, 'v:val . "/"')
-    let remote_files = systemlist(["ssh", host, "find " . dirname . " -maxdepth 1 -type f"])
-    let total = remote_dirs + remote_files
-    return filter(total, 'stridx(v:val, a:ArgLead) == 0')
-  endif
-endfunction
-
 function! s:Resync()
   " Rerun Make -> Sync commands
   let hist = map(range(-100, -1), 'histget("cmd", v:val)')
@@ -1353,8 +1352,6 @@ function! s:Resync()
     echo "Cannot rerun, not in history"
     return
   endif
-  " Most recent command to be rerun
-  let rerun_cmd = hist[-1]
 
   " (1) Build step
   let make_id = s:ObsidianMake()
@@ -1364,7 +1361,7 @@ function! s:Resync()
   endif
 
   " (2) Sync step
-  exe rerun_cmd
+  exe hist[-1]
 endfunction
 
 command! -nargs=0 Resync call <SID>Resync()
@@ -1377,9 +1374,7 @@ function! s:Rerun()
     echo "Cannot rerun, not in history"
     return
   endif
-  " Most recent command to be rerun
-  let rerun_cmd = hist[-1]
-  exe rerun_cmd
+  exe hist[-1]
 endfunction
 
 command! -nargs=0 Rerun call <SID>Rerun()
