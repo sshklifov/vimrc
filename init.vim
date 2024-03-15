@@ -150,9 +150,11 @@ set wildcharm=9
 set wildignore=*.o,*.out
 set wildignorecase
 set wildmode=full
+
 cnoremap <expr> <Up> pumvisible() ? "\<C-p>" : "\<Up>"
 cnoremap <expr> <Down> pumvisible() ? "\<C-n>" : "\<Down>"
-cnoremap <expr> <Right> pumvisible() ? "\<Down>" : "\<Right>"
+cnoremap <expr> <Left> pumvisible() ? "\<Space>\<BS>\<Left>" : "\<Left>"
+cnoremap <expr> <Right> pumvisible() ? "\<Space>\<BS>\<Right>" : "\<Right>"
 
 set scrolloff=4
 set autoread
