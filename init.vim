@@ -1253,7 +1253,7 @@ endfunction
 
 nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
 
-function s:ObsidianMake(...)
+function s:ObsidianMake(type, bang)
   let repo = split(FugitiveWorkTree(), "/")[-1]
   let obsidian_repos = ["obsidian-video", "libalcatraz", "mpp"]
   if index(obsidian_repos, repo) < 0
@@ -1261,15 +1261,23 @@ function s:ObsidianMake(...)
     return
   endif
 
-  let type = get(a:, 1, "Debug")
-  let bang = get(a:, 2, "")
+
+  let common_flags = join([
+        \ "-isystem /opt/aisys/obsidian_05/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/",
+        \ "-isystem /opt/aisys/obsidian_05/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/aarch64-aisys-linux",
+        \ "-O0 -ggdb -U_FORTIFY_SOURCE"])
+  let cxxflags = "export CXXFLAGS=" . string(common_flags)
+  let cflags = "export CFLAGS=" . string(common_flags)
 
   let env = "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux"
+
+  let type = empty(a:type) ? "Debug" : a:type
   let cmake = printf("cmake -B %s -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=%s", type, type)
   let build = printf("cmake --build %s", type)
-  let cmds = [env, cmake, build]
+
+  let cmds = [env, cxxflags, cflags, cmake, build]
   let command = ["/bin/bash", "-c", join(cmds, ';')]
-  return Make(command, bang)
+  return Make(command, a:bang)
 endfunction
 
 command! -nargs=? -bang -complete=customlist,MakeCompl Make call <SID>ObsidianMake(<q-args>, "<bang>")
