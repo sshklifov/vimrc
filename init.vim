@@ -927,8 +927,7 @@ function! s:GetIndex()
   let source = ["c", "cc", "cp", "cxx", "cpp", "CPP", "c++", "C"]
   let header = ["h", "hh", "H", "hp", "hxx", "hpp", "HPP", "h++", "tcc"]
   let regex = '.*\.\(' . join(source, '\|') . '\|' . join(header, '\|') . '\)'
-  let files = systemlist(["find", dir, "-regex", regex])
-  return SearchFilter(files)
+  return Find(dir, "-regex", regex)
 endfunction
 
 function! IndexCompl(ArgLead, CmdLine, CursorPos)
@@ -939,6 +938,23 @@ function! IndexCompl(ArgLead, CmdLine, CursorPos)
 endfunction
 
 command! -nargs=? -complete=customlist,IndexCompl Index call s:GetIndex()->ArgFilter(<q-args>)->ToQuickfix('Index')
+
+function! s:GetWorkFiles()
+  let dir = FugitiveWorkTree()
+  if !isdirectory(dir)
+    return []
+  endif
+  return Find(dir)
+endfunction
+
+function! WorkFilesCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  return s:GetWorkFiles()->SplitItems(a:ArgLead)
+endfunction
+
+command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->ArgFilter(<q-args>)->ToQuickfix('Workfiles')
 
 function! TypeHierarchyHandler(res, encoding)
   let items = []
@@ -961,7 +977,7 @@ function! TypeHierarchyHandler(res, encoding)
 endfunction
 
 function! AstHandler(buf, kinds, res)
-  " Find first CXXRecord (class/struct/union)
+  " First CXXRecord (class/struct/union)
   let queue = [a:res]
   while !empty(queue)
     let head = queue[0]
@@ -1071,7 +1087,7 @@ endfunction
 command! -nargs=0 Instances call <SID>Instances()
 
 " Convenience method allowing s:Method to work on instances
-function! s:FindInstanceType()
+function! s:InstanceType()
   let info = SymbolInfo()
   if !has_key(info, "definitionRange")
     return #{}
@@ -1113,9 +1129,9 @@ function! s:Member(filterList)
   unlet node
 
   if kind != "CXXRecord" && kind != "Record"
-    let type = s:FindInstanceType()
+    let type = s:InstanceType()
     if empty(type)
-      echo "Failed to find type of instance"
+      echo "Failed to determine type of instance"
       return
     endif
     let uri = type.textDocument.uri
