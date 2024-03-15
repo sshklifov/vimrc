@@ -112,6 +112,7 @@ cabbr Gd lefta Gdiffsplit
 cabbr Gl Gclog!
 cabbr Gb Git blame
 cabbr Gdt Git! difftool
+cabbr Gmt Git mergetool
 
 " Git commit style settings
 autocmd FileType gitcommit set spell
