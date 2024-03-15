@@ -246,7 +246,7 @@ endfunction
 let g:statusline_dict = #{}
 " Must register modules here. When multiple modules have progress output, items at the front of the
 " list will take precedence
-let g:statusline_prio = ['make', 'lsp']
+let g:statusline_prio = ['sync', 'make', 'lsp']
 call dictwatcheradd(g:statusline_dict, '*', {d, k, z -> execute('redrawstatus')})
 
 function! GetProgressStatusLine(...)
@@ -661,6 +661,25 @@ endfunction
 nmap <silent> <leader>cpp :call <SID>OpenSource()<CR>
 nmap <silent> <leader>hpp :call <SID>OpenHeader()<CR>
 
+function! s:EditCMakeLists()
+  let dir = expand("%:p:h")
+  let repo = FugitiveWorkTree()
+  if len(repo) <= 0
+    return
+  endif
+
+  while len(dir) >= len(repo)
+    let lists = dir . "/CMakeLists.txt"
+    if filereadable(lists)
+      exe "edit " . lists
+      return
+    endif
+    let dir = fnamemodify(dir, ":h")
+  endwhile
+endfunction
+
+command! -nargs=0 EditCMake call <SID>EditCMakeLists()
+
 function! s:EditFugitive()
   let actual = bufname()
   let real = FugitiveReal()
@@ -866,7 +885,7 @@ lua require('lsp')
 function! s:UpdateLspProgress() 
   let serverResponses = luaeval('vim.lsp.util.get_progress_messages()')
   if empty(serverResponses)
-    silent! unlet g:statusline_dict.lsp
+    let g:statusline_dict.lsp = ''
     return
   endif
 
@@ -892,7 +911,7 @@ function! s:UpdateLspProgress()
   endfor
 
   if totalFiles == 0
-    silent! unlet g:statusline_dict.lsp
+    let g:statusline_dict.lsp = ''
     return
   endif
 
@@ -1133,25 +1152,6 @@ command! -nargs=0 Mvar call <SID>Member(["Field"])
 
 """"""""""""""""""""""""""""Context dependent"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-function! s:OpenCMakeLists()
-  let dir = expand("%:p:h")
-  let repo = FugitiveWorkTree()
-  if len(repo) <= 0
-    return
-  endif
-
-  while len(dir) >= len(repo)
-    let lists = dir . "/CMakeLists.txt"
-    if filereadable(lists)
-      exe "edit " . lists
-      return
-    endif
-    let dir = fnamemodify(dir, ":h")
-  endwhile
-endfunction
-
-command! -nargs=0 CMake call <SID>OpenCMakeLists()
-
 function! s:ResolveEnvFile()
   let fname = expand("%:f")
   let idx = stridx(fname, "include/alcatraz")
@@ -1172,63 +1172,23 @@ endfunction
 
 nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
 
-function! RemoteExeCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-
-  let pat = "*" . a:ArgLead . "*"
-  let find = "find /home/root/Debug -name " . shellescape(pat) . " -type f -executable"
-  let ip_octet = matchlist(a:CmdLine, "[0-9][0-9]")[0]
-  let machine = "root@10.1.20." . ip_octet
-  return systemlist(["ssh", "-o", "ConnectTimeout=1", machine, find])
-endfunction
-
-function! s:ObsidianDebug(ip_octet, exe, ...)
-  let destination = "root@10.1.20." . string(a:ip_octet)
-  let debug_args = #{ssh: destination}
-  if !empty(a:exe)
-    let debug_args['exe'] = a:exe
-  endif
-  if a:0 > 0
-    let debug_args['br'] = a:1
-  endif
-  call s:Debug(debug_args)
-endfunction
-
-command! -nargs=? -complete=customlist,RemoteExeCompl Start26 call <SID>ObsidianDebug(26, <q-args>)
-command! -nargs=? -complete=customlist,RemoteExeCompl Start14 call <SID>ObsidianDebug(14, <q-args>)
-command! -nargs=? -complete=customlist,RemoteExeCompl Run26 call <SID>ObsidianDebug(26, <q-args>, <SID>GetDebugLoc())
-command! -nargs=? -complete=customlist,RemoteExeCompl Run14 call <SID>ObsidianDebug(14, <q-args>, <SID>GetDebugLoc())
-
-function! s:ObsidianAttach(ip_octet)
-  let machine = "root@10.1.20." . string(a:ip_octet)
-  let pid = systemlist(["ssh", "-o", "ConnectTimeout=1", machine, "pgrep obsidian-video"])
-  if len(pid) > 1
-    echo "Multiple instances of obsidian video"
-  elseif len(pid) < 1
-    echo "Obsidian video is not running"
-  else
-    call s:Debug(#{ssh: machine, proc: pid[0]})
-  endif
-endfunction
-
-command! -nargs=0 Attach14 call <SID>ObsidianAttach(14)
-
-function s:ObsidianMake(bang, target)
+function s:ObsidianMake(...)
   const makefile = FugitiveFind('Makefile')
   if !filereadable(makefile)
     echo "No makefile"
     return
   endif
 
-  let env = "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux;" 
-  let make_command = "make -f " . makefile . " " . a:target
-  let command = ["/bin/bash", "-c", env . make_command]
-  call Make(command, a:bang)
+  let target = get(a:, 1, "")
+  let bang = get(a:, 2, "")
+
+  let env = "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux"
+  let cmd = "make -f " . makefile . " " . target
+  let command = ["/bin/bash", "-c", env . ';' . cmd]
+  return Make(command, bang)
 endfunction
 
-command! -nargs=? -bang -complete=customlist,MakeCompl Make call <SID>ObsidianMake("<bang>", <q-args>)
+command! -nargs=? -bang -complete=customlist,MakeCompl Make call <SID>ObsidianMake(<q-args>, "<bang>")
 
 function! MakeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -1243,13 +1203,204 @@ function! MakeCompl(ArgLead, CmdLine, CursorPos)
   return filter(targets, "stridx(v:val, '" . a:ArgLead . "') >= 0")
 endfunction
 
+function! RemoteExeCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+
+  let pat = "*" . a:ArgLead . "*"
+  let find = "find /home/root -name " . shellescape(pat) . " -type f -executable"
+  if stridx(a:CmdLine, 'Start') == 0
+    let host = s:GetHostFromCommand('Start', a:CmdLine)
+  else
+    let host = s:GetHostFromCommand('Run', a:CmdLine)
+  endif
+  return systemlist(["ssh", "-o", "ConnectTimeout=1", host, find])
+endfunction
+
+function! s:RemoteDebug(host, exe, ...)
+  let debug_args = #{ssh: a:host}
+  if !empty(a:exe)
+    let debug_args['exe'] = a:exe
+  endif
+  if a:0 > 0
+    let debug_args['br'] = a:1
+  endif
+  call s:Debug(debug_args)
+endfunction
+
+function! s:RemoteAttach(host, proc)
+  let pid = systemlist(["ssh", "-o", "ConnectTimeout=1", a:host, "pgrep " . a:proc])
+  if len(pid) > 1
+    echo "Multiple instances of " . a:proc
+  elseif len(pid) < 1
+    echo a:proc . " is not running"
+  else
+    call s:Debug(#{ssh: machine, proc: pid[0]})
+  endif
+endfunction
+
+function! s:RemoteSync(bang, arg, host)
+  function! OnStdout(id, data, event)
+    for data in a:data
+      let text = substitute(data, '\n', '', 'g')
+      if len(text) > 0
+        let m = matchlist(text, '[0-9]\+%')
+        if len(m) > 0 && !empty(m[0])
+          let g:statusline_dict['sync'] = m[0]
+        endif
+      endif
+    endfor
+  endfunction
+
+  function! OnExit(id, code, event)
+    if a:code == 0
+      echom "Synced!"
+    else
+      echom "Sync failed!"
+    endif
+    let g:statusline_dict['sync'] = ''
+  endfunction
+
+  let dir = empty(a:arg) ? FugitiveFind("Debug") : a:arg
+  if !isdirectory(dir) && !filereadable(dir)
+    echo "Not found: " . dir
+    return
+  endif
+  " Remove leading / or rsync will be naughty
+  if dir[-1:-1] == '/'
+    let dir = dir[0:-2]
+  endif
+  const remote_dir = a:host . ":/home/root/"
+
+  if empty(a:bang)
+    let cmd = ["rsync", "-rlt", "--info=progress2", dir, remote_dir]
+    let opts = #{on_stdout: funcref("OnStdout"), on_exit: funcref("OnExit")}
+    return jobstart(cmd, opts)
+  else
+    bot new
+    let cmd = ["rsync", "-rlt", "--info=all4", dir, remote_dir]
+    let opts = #{on_exit: funcref("OnExit")}
+    let id = termopen(cmd, opts)
+    call cursor("$", 1)
+    return id
+  endif
+endfunction
+
+function! s:SshTerm(remote)
+  tabnew
+  startinsert
+  let id = termopen(["ssh", a:remote])
+  call chansend(id, "cd /home/root\n")
+  call chansend(id, "clear\n")
+endfunction
+
+function! s:Sshfs(remote, args)
+  silent exe "edit scp://" . a:remote . "/" . a:args
+endfunction
+
+function! SshfsCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+
+  let host = s:GetHostFromCommand('Sshfs', a:CmdLine)
+  if empty(a:ArgLead)
+    return systemlist(["ssh", host, "find / -maxdepth 1"])
+  else
+    let dirname = fnamemodify(a:ArgLead, ':h')
+    let remote_dirs = systemlist(["ssh", host, "find " . dirname . " -maxdepth 1 -type d"])
+    let remote_dirs = map(remote_dirs, 'v:val . "/"')
+    let remote_files = systemlist(["ssh", host, "find " . dirname . " -maxdepth 1 -type f"])
+    let total = remote_dirs + remote_files
+    return filter(total, 'stridx(v:val, a:ArgLead) == 0')
+  endif
+endfunction
+
+function! s:Resync()
+  " Rerun Make -> Sync commands
+  let hist = map(range(-100, -1), 'histget("cmd", v:val)')
+  let hist = filter(hist, 'stridx(v:val, "Sync") == 0')
+  if empty(hist)
+    echo "Cannot rerun, not in history"
+    return
+  endif
+  " Most recent command to be rerun
+  let rerun_cmd = hist[-1]
+
+  " (1) Build step
+  let make_id = s:ObsidianMake()
+  let exit = jobwait([make_id])
+  if exit[0] != 0
+    return
+  endif
+
+  " (2) Sync step
+  exe rerun_cmd
+endfunction
+
+command! -nargs=0 Resync call <SID>Resync()
+
+function! s:Rerun()
+  " Rerun last Start / Run command
+  let hist = map(range(-100, -1), 'histget("cmd", v:val)')
+  let hist = filter(hist, 'stridx(v:val, "Run") == 0 || stridx(v:val, "Start") == 0')
+  if empty(hist)
+    echo "Cannot rerun, not in history"
+    return
+  endif
+  " Most recent command to be rerun
+  let rerun_cmd = hist[-1]
+  exe rerun_cmd
+endfunction
+
+command! -nargs=0 Rerun call <SID>Rerun()
+
+function! s:Rerere()
+  call s:Resync()
+  call s:Rerun()
+endfunction
+
+command! -nargs=0 -bang Rerere call <SID>Rerere()
+
+const g:remote_map = {
+      \ '14': 'root@10.1.20.14',
+      \ 'Miro': 'root@10.1.20.14',
+      \ '26': 'root@10.1.20.26',
+      \ 'BrokenRGB': 'root@10.1.20.26',
+      \ '28': 'root@10.1.20.28',
+      \ 'BrokenIR': 'root@10.1.20.28'
+      \ }
+
+function! s:GetHostFromCommand(cmdbase, cmdline) abort
+  let part = a:cmdline[len(a:cmdbase):]
+  for key in keys(g:remote_map)
+    if stridx(part, key) == 0
+      return g:remote_map[key]
+    endif
+  endfor
+  echoerr "FIXME"
+endfunction
+
+function s:InstallRemoteCommands()
+  for key in keys(g:remote_map)
+    let remote = g:remote_map[key]
+    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start%s call <SID>RemoteDebug('%s', <q-args>)", key, remote)
+    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run%s call <SID>RemoteDebug('%s', <q-args>, <SID>GetDebugLoc())", key, remote)
+    exe printf("command! -nargs=1 Attach%s call <SID>RemoteAttach('%s', <q-args>)", key, remote)
+    exe printf("command! -nargs=? -bang -complete=file Sync%s call <SID>RemoteSync('<bang>', <q-args>, '%s')", key, remote)
+    exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs%s call <SID>Sshfs('%s', <q-args>)", key, remote)
+    exe printf("command! -nargs=0 Ssh%s call <SID>SshTerm('%s')", key, remote)
+  endfor
+endfunction
+
+call s:InstallRemoteCommands()
+"}}}
+
 " Indentation settings (will be overriden by vim-sleuth)
 set expandtab
 set shiftwidth=2
 set tabstop=2
 set softtabstop=0
 set cinoptions=L0,l1,b0,g1,t0,(s,U1,N-s
-" Max line width
 set cc=101
-
-"}}}
