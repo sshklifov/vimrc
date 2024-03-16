@@ -116,5 +116,6 @@ lspconfig.clangd.setup {
         container = true
       }
     }
-  }
+  },
+  filetypes = { 'c', 'cpp' }
 }

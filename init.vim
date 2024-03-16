@@ -402,6 +402,23 @@ endfunction
 
 nnoremap <silent> <leader>dif :call <SID>ToggleDiff()<CR>
 
+function! s:DiffNameOnly()
+  let dict = FugitiveExecute(["diff", "--name-only"])
+  if dict['exit_status'] != 0
+    echo "Not inside repo"
+    return
+  endif
+  let files = filter(dict['stdout'], "!empty(v:val)")
+  if empty(files)
+    echo "No files"
+    return
+  endif
+  let files = map(files, "FugitiveFind(v:val)")
+  call DisplayInQf(files, "Unstaged")
+endfunction
+
+command! -nargs=0 Unstaged call s:DiffNameOnly()
+
 set updatetime=500
 set completeopt=menuone
 inoremap <silent> <C-Space> <C-X><C-O>
@@ -417,7 +434,7 @@ function! s:SwitchToBranch(arg)
     echo "Not inside repo"
     return
   endif
-  if len(dict) > 1 && dict['stdout'][0] != ''
+  if dict['stdout'][0] != ''
     echo "Dirty repo detected"
     return
   endif
@@ -465,7 +482,7 @@ endfunction
 function! s:Review(bang, arg)
   if exists("g:review_stack")
     let items = g:review_stack[-1]
-    call ToQuickfix(items, "Review")
+    call DisplayInQf(items, "Review")
     return
   endif
 
@@ -531,17 +548,17 @@ endfunction
 
 command! -nargs=? -bang -complete=customlist,OriginCompl Review call <SID>Review("<bang>", <q-args>)
 
-function! s:ReviewCompleteFiles(cmd_bang, pat) abort
+function! s:ReviewCompleteFiles(cmd_bang, arg) abort
   if !exists("g:review_stack")
     echo "Start a review first"
     return
   endif
 
   let new_items = copy(g:review_stack[-1])
-  if !empty(a:pat)
-    let match_idx = printf("match(bufname(v:val.bufnr), \'%s\')", a:pat)
+  if !empty(a:arg)
+    let idx = printf("stridx(bufname(v:val.bufnr), %s)", string(a:arg))
     let comp = a:cmd_bang == "!" ? " != " : " == "
-    let new_items = filter(new_items, match_idx . comp . "-1")
+    let new_items = filter(new_items, idx . comp . "-1")
     let n = len(g:review_stack[-1]) - len(new_items)
     echo "Completed " . n . " files"
   else
@@ -553,7 +570,7 @@ function! s:ReviewCompleteFiles(cmd_bang, pat) abort
   if empty(new_items)
     echo "Review completed!"
   else
-    call ToQuickfix(new_items, "Review")
+    call DisplayInQf(new_items, "Review")
   endif
   " Close diff
   if s:DiffFugitiveWinid() >= 0
@@ -581,7 +598,7 @@ function! s:UncompleteFiles()
   if len(g:review_stack) > 1
     call remove(g:review_stack, -1)
     let items = g:review_stack[-1]
-    call ToQuickfix(items, "Review")
+    call DisplayInQf(items, "Review")
   end
 endfunction
 
@@ -675,7 +692,7 @@ endfunction
 nmap <silent> <leader>cpp :call <SID>OpenSource()<CR>
 nmap <silent> <leader>hpp :call <SID>OpenHeader()<CR>
 
-function! s:EditCMakeLists()
+function! s:OpenCMakeLists()
   let dir = expand("%:p:h")
   let repo = FugitiveWorkTree()
   if len(repo) <= 0
@@ -692,7 +709,7 @@ function! s:EditCMakeLists()
   endwhile
 endfunction
 
-command! -nargs=0 EditCMake call <SID>EditCMakeLists()
+command! -nargs=0 CMake call <SID>OpenCMakeLists()
 
 function! s:EditFugitive()
   let actual = bufname()
@@ -961,7 +978,7 @@ function! IndexCompl(ArgLead, CmdLine, CursorPos)
   return s:GetIndex()->SplitItems(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,IndexCompl Index call s:GetIndex()->ArgFilter(<q-args>)->ToQuickfix('Index')
+command! -nargs=? -complete=customlist,IndexCompl Index call s:GetIndex()->ArgFilter(<q-args>)->DropInQf('Index')
 
 function! s:GetWorkFiles()
   let dir = FugitiveWorkTree()
@@ -978,7 +995,7 @@ function! WorkFilesCompl(ArgLead, CmdLine, CursorPos)
   return s:GetWorkFiles()->SplitItems(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->ArgFilter(<q-args>)->ToQuickfix('Workfiles')
+command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->ArgFilter(<q-args>)->DisplayInQf('Workfiles')
 
 function! TypeHierarchyHandler(res, encoding)
   let items = []
@@ -996,43 +1013,7 @@ function! TypeHierarchyHandler(res, encoding)
     call cursor(line, col)
   elseif len(items) > 1
     let items = v:lua.vim.lsp.util.locations_to_items(items, a:encoding)
-    call ToQuickfix(items, "Hierarchy")
-  endif
-endfunction
-
-function! AstHandler(buf, kinds, res)
-  " First CXXRecord (class/struct/union)
-  let queue = [a:res]
-  while !empty(queue)
-    let head = queue[0]
-    call remove(queue, 0)
-    if head.kind == 'CXXRecord'
-      break
-    endif
-    if has_key(head, 'children')
-      let queue += head.children
-    endif
-  endwhile
-
-  " Load all child methods
-  if head.kind == 'CXXRecord'
-    let items = []
-    let queue = [head]
-    while !empty(queue)
-      let head = queue[0]
-      call remove(queue, 0)
-      if index(a:kinds, head.kind) >= 0
-        let lnum = head.range.start.line + 1
-        let col = head.range.start.character + 1
-        let text = readfile(bufname(a:buf))[lnum-1][col-1:]
-        call add(items, #{bufnr: a:buf, lnum: lnum, col: col, text: text})
-      endif
-      if has_key(head, 'children')
-        let queue += head.children
-      endif
-    endwhile
-    call sort(items, {a, b -> a.lnum - b.lnum})
-    call ToQuickfix(items, "AST")
+    call DropInQf(items, "Hierarchy")
   endif
 endfunction
 
@@ -1047,7 +1028,7 @@ function! ReferenceContainerHandler(res)
         \ col: v:val.range.start.character + 1,
         \ text: v:val.containerName}")
   call sort(items, {a, b -> a.lnum - b.lnum})
-  call ToQuickfix(items, "References")
+  call DisplayInQf(items, "References")
 endfunction
 
 function! s:LspRequestSync(buf, method, params)
@@ -1068,17 +1049,6 @@ function! SymbolInfo()
 endfunction
 
 command! -nargs=0 Info echo SymbolInfo()
-
-function! SyntaxTreeCword()
-  let line = getpos('.')[1] - 1
-  let char = getpos('.')[2] - 1
-  let range = #{start: #{line: line, character: char}, end: #{line: line, character: char + 1}}
-  let params = #{textDocument: #{uri: v:lua.vim.uri_from_bufnr(0)}, range: range}
-  let resp =  s:LspRequestSync(0, 'textDocument/ast', params)
-  return resp
-endfunction
-
-command! -nargs=0 Tree echo SyntaxTreeCword()
 
 function! s:Instances()
   let params = v:lua.vim.lsp.util.make_position_params()
@@ -1104,91 +1074,11 @@ function! s:Instances()
     echo "No instances"
   else
     call sort(items, {a, b -> a.lnum - b.lnum})
-    call ToQuickfix(items, "Instances")
+    call DisplayInQf(items, "Instances")
   endif
 endfunction
 
 command! -nargs=0 Instances call <SID>Instances()
-
-" Convenience method allowing s:Method to work on instances
-function! s:InstanceType()
-  let info = SymbolInfo()
-  if !has_key(info, "definitionRange")
-    return #{}
-  endif
-  let range = info.definitionRange.range
-  let uri = info.definitionRange.uri
-  let params = #{range: range, textDocument: #{uri: uri}}
-  let resp =  s:LspRequestSync(v:lua.vim.uri_to_bufnr(uri), 'textDocument/ast', params)
-  if empty(resp)
-    return #{}
-  endif
-  " Locate variable type in the definition AST
-  let queue = [resp]
-  while !empty(queue)
-    let head = queue[0]
-    call remove(queue, 0)
-    if head.kind == 'record'
-      break
-    endif
-    if has_key(head, 'children')
-      let queue += head.children
-    endif
-  endwhile
-  if head.kind == 'record'
-    return #{textDocument: #{uri: uri}, range: head.range}
-  endif
-  return #{}
-endfunction
-
-function! s:Member(filterList)
-  let node = SyntaxTreeCword()
-  if !has_key(node, "kind")
-    echo "Failed to detect cword"
-    return
-  endif
-  let uri = v:lua.vim.uri_from_bufnr(0)
-  let kind = node.kind
-  let range = node.range
-  unlet node
-
-  if kind != "CXXRecord" && kind != "Record"
-    let type = s:InstanceType()
-    if empty(type)
-      echo "Failed to determine type of instance"
-      return
-    endif
-    let uri = type.textDocument.uri
-    let range = type.range
-    let kind = "Record"
-  endif
-
-  if kind != "CXXRecord"
-    let bufnr = v:lua.vim.uri_to_bufnr(uri)
-    let params = #{position: range.start, textDocument: #{uri: uri}}
-    let resp = s:LspRequestSync(bufnr, 'textDocument/symbolInfo', params)
-    if empty(resp) || !has_key(resp[0], "declarationRange")
-      echo "Failed to find class declaration"
-      return
-    endif
-    let uri = resp[0].declarationRange.uri
-    let range = resp[0].declarationRange.range
-  endif
-
-  unlet kind " CXXRecord
-
-  let params = #{textDocument: #{uri: uri}, range: range}
-  let bufnr = v:lua.vim.uri_to_bufnr(uri)
-  let resp = s:LspRequestSync(bufnr, 'textDocument/ast', params)
-  if empty(resp)
-    echo "Failed to load AST of class"
-    return
-  endif
-  call AstHandler(bufnr, a:filterList, resp)
-endfunction
-
-command! -nargs=0 Mfun call <SID>Member(["CXXMethod", "CXXConstructor", "CXXDestructor"])
-command! -nargs=0 Mvar call <SID>Member(["Field"])
 "}}}
 
 """"""""""""""""""""""""""""REMOTE"""""""""""""""""""""""""""" {{{
