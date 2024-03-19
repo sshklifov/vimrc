@@ -68,11 +68,7 @@ function ShowAutoCompletion()
   local pos = api.nvim_win_get_cursor(0)
   local cursor_pos = pos[2]
   local line = api.nvim_get_current_line()
-  local end_of_line = (cursor_pos == string.len(line))
-  if not end_of_line then
-    return ClearAutoCompletion()
-  end
-  local prefix = vim.fn.matchstr(line, '\\k*$')
+  local prefix = vim.fn.matchstr(string.sub(line, 1, cursor_pos), '\\k*$')
   if string.len(prefix) == 0 then
     return ClearAutoCompletion()
   end
