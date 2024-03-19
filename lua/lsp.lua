@@ -94,11 +94,19 @@ function ShowAutoCompletion()
       return
     end
 
-    local text = string.sub(new_text, string.len(old_text) + 1, -1)
-    local line_pos = pos[1] - 1
-    local opts = {virt_text = {{text, "NonText"}}, virt_text_win_col = col_end}
-    local ns = api.nvim_create_namespace("autocomplete")
-    local mark = api.nvim_buf_set_extmark(0, ns, line_pos, -1, opts)
+    local end_of_line = (cursor_pos == string.len(line))
+    if end_of_line then
+      -- Display inline
+      local text = string.sub(new_text, string.len(old_text) + 1, -1)
+      local line_pos = pos[1] - 1
+      local opts = {virt_text = {{text, "NonText"}}, virt_text_win_col = col_end}
+      local ns = api.nvim_create_namespace("autocomplete")
+      local mark = api.nvim_buf_set_extmark(0, ns, line_pos, -1, opts)
+    else
+      -- Display whole completion in pum
+      local insert_pos = cursor_pos + 1 - string.len(prefix)
+      vim.fn.complete(insert_pos, {complete_items[1]})
+    end
   end
 
   vim.lsp.buf_request(bufnr, 'textDocument/completion', params, handler)
@@ -123,7 +131,12 @@ end
 function AcceptAutoCompletion()
   local res = GetAutoCompletion()
   ClearAutoCompletion()
-  return res
+
+  if vim.fn.pumvisible() then
+    return vim.fn.nr2char(25) -- <C-y>
+  else
+    return res
+  end
 end
 
 -- Keymaps and registration

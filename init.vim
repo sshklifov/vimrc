@@ -449,7 +449,7 @@ function UntrackedCompl(ArgLead, CmdLine, CursorPos)
 endfunction
 
 set updatetime=500
-set completeopt=menuone
+set completeopt=menuone,noinsert
 inoremap <silent> <C-Space> <C-X><C-O>
 
 " http://vim.wikia.com/wiki/Automatically_append_closing_characters
