@@ -21,10 +21,9 @@ Plug 'sshklifov/qutil'
 call plug#end()
 
 " Redefine the group, avoids having the same autocommands twice
-if exists('#vimrc')
-  augroup! vimrc
-end
 augroup vimrc
+au!
+autocmd BufWritePost init.vim source ~/.config/nvim/init.vim
 
 """"""""""""""""""""""""""""Plugin settings"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -110,7 +109,6 @@ set diffopt+=vertical
 
 " Open vimrc quick (muy importante)
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
-nnoremap <silent> <leader>sv :so ~/.config/nvim/init.vim<CR>
 nnoremap <silent> <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
 
 " Indentation settings (will be overriden by vim-sleuth)
@@ -1248,29 +1246,67 @@ endfunction
 
 """"""""""""""""""""""""""""COMPLETION"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-function Omnifunc()
+function! ClearOmni()
+  let ns = nvim_create_namespace("autocomplete")
+  call nvim_buf_clear_namespace(0, ns, 0, -1)
+endfunction
+
+function! AcceptOmni()
+  let ns = nvim_create_namespace("autocomplete")
+  let extmarks = nvim_buf_get_extmarks(0, ns, 0, -1, #{details: 1})
+  if !empty(extmarks)
+    let details = extmarks[0][3]
+    let text = details.virt_text[0][0]
+    return text
+  endif
+  return nr2char(9)
+endfunction
+
+function! Omnifunc()
+  let ns = nvim_create_namespace("autocomplete")
+  " Clear buffer extmarks
+  call nvim_buf_clear_namespace(0, ns, 0, -1)
+
   let bufnr = nvim_get_current_buf()
-  " local has_buffer_clients = not tbl_isempty(all_buffer_active_clients[bufnr] or {})
-  " if not has_buffer_clients then
-  "   if findstart == 1 then
-  "     return -1
-  "   else
-  "     return {}
-  "   end
-  " end
-
-  let cursor_pos = nvim_win_get_cursor(0)[1]
+  let pos = nvim_win_get_cursor(0)
+  let cursor_pos = pos[1]
   let line = nvim_get_current_line()
-  let line_to_cursor = line[:cursor_pos]
+  let end_of_line = empty(line[cursor_pos:])
+  if !end_of_line
+    return ''
+  endif
+  let prefix = matchstr(line, '\k*$')
+  if empty(prefix)
+    return
+  endif
 
-  let textMatch = match(line_to_cursor, '\\k*$')
   let params = v:lua.vim.lsp.util.make_position_params()
   let resp = v:lua.vim.lsp.buf_request_sync(bufnr, 'textDocument/completion', params)
 
-  let startbyte = textMatch
-  let prefix = line[startbyte:cursor_pos]
-  return line_to_cursor
-  " return vim.lsp.util.text_document_completion_list_to_complete_items(resp[1]['result'], prefix)
+  if type(resp) == v:t_list && !empty(resp)
+    if type(resp[0]) == v:t_dict && has_key(resp[0], 'result')
+      let completion_list = resp[0]['result']
+      " TODO possible optimization by removing this call
+      let complete_items = v:lua.vim.lsp.util.text_document_completion_list_to_complete_items(completion_list, prefix)
+      if empty(complete_items)
+        return
+      endif
+
+      let text_edit = complete_items[0].user_data.nvim.lsp.completion_item.textEdit
+      let col_start = text_edit.range.start.character
+      let col_end = text_edit.range.end.character
+      let new_text = text_edit.newText
+      let old_text = line[col_start:col_end]
+      if old_text == new_text
+        return
+      endif
+
+      let text = new_text[len(old_text):]
+      let line_pos = pos[0] - 1
+      let opts = #{virt_text: [[text, "NonText"]], virt_text_win_col: col_end}
+      let mark = nvim_buf_set_extmark(0, ns, line_pos, -1, opts)
+    endif
+  endif
 endfunction
 "}}}
 

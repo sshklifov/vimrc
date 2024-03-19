@@ -97,6 +97,11 @@ local OnAttach = function(client, bufnr)
   vim.cmd('autocmd CursorHold <buffer> lua vim.lsp.buf.document_highlight()')
   vim.cmd('autocmd CursorHoldI <buffer> lua vim.lsp.buf.document_highlight()')
   vim.cmd('autocmd CursorMoved <buffer> lua vim.lsp.buf.clear_references()')
+
+  vim.cmd('autocmd TextChangedI <buffer> call Omnifunc()')
+  vim.cmd('autocmd InsertLeave <buffer> call ClearOmni()')
+  vim.cmd('autocmd CompleteChanged <buffer> call ClearOmni()')
+  vim.cmd('inoremap <expr> <Tab> AcceptOmni()')
 end
 
 lspconfig.clangd.setup {
