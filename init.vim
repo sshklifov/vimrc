@@ -20,6 +20,12 @@ Plug 'sshklifov/qutil'
 
 call plug#end()
 
+" Redefine the group, avoids having the same autocommands twice
+if exists('#vimrc')
+  augroup! vimrc
+end
+augroup vimrc
+
 """"""""""""""""""""""""""""Plugin settings"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -104,7 +110,16 @@ set diffopt+=vertical
 
 " Open vimrc quick (muy importante)
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
+nnoremap <silent> <leader>sv :so ~/.config/nvim/init.vim<CR>
 nnoremap <silent> <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
+
+" Indentation settings (will be overriden by vim-sleuth)
+set expandtab
+set shiftwidth=2
+set tabstop=2
+set softtabstop=0
+set cinoptions=L0,l1,b0,g1,t0,(s,U1,N-s
+set cc=101
 
 cabbr Gd lefta Gdiffsplit
 cabbr Gl Gclog!
@@ -1231,6 +1246,34 @@ function! SshfsCompl(ArgLead, CmdLine, CursorPos)
 endfunction
 "}}}
 
+""""""""""""""""""""""""""""COMPLETION"""""""""""""""""""""""""""" {{{
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function Omnifunc()
+  let bufnr = nvim_get_current_buf()
+  " local has_buffer_clients = not tbl_isempty(all_buffer_active_clients[bufnr] or {})
+  " if not has_buffer_clients then
+  "   if findstart == 1 then
+  "     return -1
+  "   else
+  "     return {}
+  "   end
+  " end
+
+  let cursor_pos = nvim_win_get_cursor(0)[1]
+  let line = nvim_get_current_line()
+  let line_to_cursor = line[:cursor_pos]
+
+  let textMatch = match(line_to_cursor, '\\k*$')
+  let params = v:lua.vim.lsp.util.make_position_params()
+  let resp = v:lua.vim.lsp.buf_request_sync(bufnr, 'textDocument/completion', params)
+
+  let startbyte = textMatch
+  let prefix = line[startbyte:cursor_pos]
+  return line_to_cursor
+  " return vim.lsp.util.text_document_completion_list_to_complete_items(resp[1]['result'], prefix)
+endfunction
+"}}}
+
 """"""""""""""""""""""""""""Context dependent"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:ResolveEnvFile()
@@ -1394,14 +1437,16 @@ endfunction
 
 command! -nargs=0 -bang Rerere call <SID>Rerere()
 
-const g:remote_map = {
-      \ '14': 'root@10.1.20.14',
-      \ 'Miro': 'root@10.1.20.14',
-      \ '26': 'root@10.1.20.26',
-      \ 'BrokenRGB': 'root@10.1.20.26',
-      \ '28': 'root@10.1.20.28',
-      \ 'BrokenIR': 'root@10.1.20.28'
-      \ }
+if !exists('g:remote_map')
+  const g:remote_map = {
+        \ '14': 'root@10.1.20.14',
+        \ 'Miro': 'root@10.1.20.14',
+        \ '26': 'root@10.1.20.26',
+        \ 'BrokenRGB': 'root@10.1.20.26',
+        \ '28': 'root@10.1.20.28',
+        \ 'BrokenIR': 'root@10.1.20.28'
+        \ }
+endif
 
 function! s:GetHostFromCommand(cmdbase, cmdline) abort
   let part = a:cmdline[len(a:cmdbase):]
@@ -1428,10 +1473,5 @@ endfunction
 call s:InstallRemoteCommands()
 "}}}
 
-" Indentation settings (will be overriden by vim-sleuth)
-set expandtab
-set shiftwidth=2
-set tabstop=2
-set softtabstop=0
-set cinoptions=L0,l1,b0,g1,t0,(s,U1,N-s
-set cc=101
+" Go back to default autocommand group
+augroup END
