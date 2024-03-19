@@ -1,6 +1,7 @@
 -- vim: set sw=2 ts=2 sts=2 foldmethod=marker:
 
 local lspconfig = require('lspconfig')
+local api = vim.api
 
 -- Clangd extensions
 
@@ -14,7 +15,7 @@ local RequestBaseClass = function()
       vim.notify('No results')
     else
       local client = vim.lsp.get_client_by_id(ctx.client_id)
-      vim.api.nvim_call_function("TypeHierarchyHandler", {res, client.offset_encoding})
+      api.nvim_call_function("TypeHierarchyHandler", {res, client.offset_encoding})
     end
   end
   vim.lsp.buf_request(0, 'textDocument/typeHierarchy', params, handler)
@@ -30,7 +31,7 @@ local RequestDerivedClass = function()
       vim.notify('No results')
     else
       local client = vim.lsp.get_client_by_id(ctx.client_id)
-      vim.api.nvim_call_function("TypeHierarchyHandler", {res, client.offset_encoding})
+      api.nvim_call_function("TypeHierarchyHandler", {res, client.offset_encoding})
     end
   end
   vim.lsp.buf_request(0, 'textDocument/typeHierarchy', params, handler)
@@ -42,7 +43,7 @@ local RequestReferenceContainer = function()
     if not res or vim.tbl_isempty(res) then
       vim.notify('No results')
     else
-      vim.api.nvim_call_function("ReferenceContainerHandler", {res})
+      api.nvim_call_function("ReferenceContainerHandler", {res})
     end
   end
   vim.lsp.buf_request(0, 'textDocument/references', params, handler)
@@ -54,18 +55,87 @@ local RequestSwitchSourceHeader = function()
     if not res then
       vim.notify('No results')
     else
-      vim.api.nvim_call_function("SwitchSourceHeaderHandler", {res})
+      api.nvim_call_function("SwitchSourceHeaderHandler", {res})
     end
   end
   vim.lsp.buf_request(0, 'textDocument/switchSourceHeader', params, handler)
 end
 
+-- Auto completion
+
+function ShowAutoCompletion()
+  local bufnr = api.nvim_get_current_buf()
+  local pos = api.nvim_win_get_cursor(0)
+  local cursor_pos = pos[2]
+  local line = api.nvim_get_current_line()
+  local end_of_line = (cursor_pos == string.len(line))
+  if not end_of_line then
+    return ClearAutoCompletion()
+  end
+  local prefix = vim.fn.matchstr(line, '\\k*$')
+  if string.len(prefix) == 0 then
+    return ClearAutoCompletion()
+  end
+
+  local params = vim.lsp.util.make_position_params()
+  local handler = function(err, res, ctx)
+    -- Clear the autocompletion as late as possible. Avoids the delay with in the LSP response
+    ClearAutoCompletion()
+    if err or not res or vim.tbl_isempty(res) then
+      return
+    end
+    local complete_items = vim.lsp.util.text_document_completion_list_to_complete_items(res, prefix)
+    if vim.tbl_isempty(complete_items) then
+      return
+    end
+
+    local text_edit = complete_items[1].user_data.nvim.lsp.completion_item.textEdit
+    local col_start = text_edit.range.start.character
+    local col_end = text_edit.range['end'].character
+    local new_text = text_edit.newText
+    local old_text = string.sub(line, col_start + 1, col_end)
+    if old_text == new_text then
+      return
+    end
+
+    local text = string.sub(new_text, string.len(old_text) + 1, -1)
+    local line_pos = pos[1] - 1
+    local opts = {virt_text = {{text, "NonText"}}, virt_text_win_col = col_end}
+    local ns = api.nvim_create_namespace("autocomplete")
+    local mark = api.nvim_buf_set_extmark(0, ns, line_pos, -1, opts)
+  end
+
+  vim.lsp.buf_request(bufnr, 'textDocument/completion', params, handler)
+end
+
+function ClearAutoCompletion()
+  local ns = api.nvim_create_namespace("autocomplete")
+  api.nvim_buf_clear_namespace(0, ns, 0, -1)
+end
+
+function GetAutoCompletion()
+  local ns = api.nvim_create_namespace("autocomplete")
+  local extmarks = api.nvim_buf_get_extmarks(0, ns, 0, -1, {details = 1})
+  if not vim.tbl_isempty(extmarks) then
+    local details = extmarks[1][4]
+    local text = details.virt_text[1][1]
+    return text
+  end
+  return vim.fn.nr2char(9)
+end
+
+function AcceptAutoCompletion()
+  local res = GetAutoCompletion()
+  ClearAutoCompletion()
+  return res
+end
+
 -- Keymaps and registration
 
 local OnAttach = function(client, bufnr)
-  local function buf_set_keymap(...) vim.api.nvim_buf_set_keymap(bufnr, ...) end
-  local function buf_set_option(...) vim.api.nvim_buf_set_option(bufnr, ...) end
-  local function user_command(...) vim.api.nvim_buf_create_user_command(bufnr, ...) end
+  local function buf_set_keymap(...) api.nvim_buf_set_keymap(bufnr, ...) end
+  local function buf_set_option(...) api.nvim_buf_set_option(bufnr, ...) end
+  local function user_command(...) api.nvim_buf_create_user_command(bufnr, ...) end
 
   -- Enable completion triggered by <c-x><c-o>
   buf_set_option('omnifunc', 'v:lua.vim.lsp.omnifunc')
@@ -98,10 +168,10 @@ local OnAttach = function(client, bufnr)
   vim.cmd('autocmd CursorHoldI <buffer> lua vim.lsp.buf.document_highlight()')
   vim.cmd('autocmd CursorMoved <buffer> lua vim.lsp.buf.clear_references()')
 
-  vim.cmd('autocmd TextChangedI <buffer> call Omnifunc()')
-  vim.cmd('autocmd InsertLeave <buffer> call ClearOmni()')
-  vim.cmd('autocmd CompleteChanged <buffer> call ClearOmni()')
-  vim.cmd('inoremap <expr> <Tab> AcceptOmni()')
+  vim.cmd('autocmd TextChangedI <buffer> lua ShowAutoCompletion()')
+  vim.cmd('autocmd InsertLeave <buffer> lua ClearAutoCompletion()')
+  vim.cmd('autocmd CompleteChanged <buffer> lua ClearAutoCompletion()')
+  vim.cmd('inoremap <expr> <Tab> luaeval("AcceptAutoCompletion()")')
 end
 
 lspconfig.clangd.setup {
