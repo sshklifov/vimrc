@@ -402,22 +402,51 @@ endfunction
 
 nnoremap <silent> <leader>dif :call <SID>ToggleDiff()<CR>
 
-function! s:DiffNameOnly()
-  let dict = FugitiveExecute(["diff", "--name-only"])
+function! s:GetUnstaged()
+  let dict = FugitiveExecute(["ls-files", "--exclude-standard", "--modified"])
   if dict['exit_status'] != 0
-    echo "Not inside repo"
-    return
+    return []
   endif
   let files = filter(dict['stdout'], "!empty(v:val)")
   if empty(files)
-    echo "No files"
-    return
+    return []
   endif
-  let files = map(files, "FugitiveFind(v:val)")
-  call DisplayInQf(files, "Unstaged")
+  return map(files, "FugitiveFind(v:val)")
 endfunction
 
-command! -nargs=0 Unstaged call s:DiffNameOnly()
+command! -nargs=? -complete=customlist,UnstagedCompl Unstaged
+      \ call s:GetUnstaged()->ArgFilter(<q-args>)->DropInQf("Unstaged")
+
+function UnstagedCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  " TODO stridx("Unstaged!") is a bug when the command typed is Unst!
+  " TODO in other places as well
+  return s:GetUnstaged()->TailItems(a:ArgLead)
+endfunction
+
+function! s:GetUntracked()
+  let dict = FugitiveExecute(["ls-files", "--exclude-standard", "--others"])
+  if dict['exit_status'] != 0
+    return []
+  endif
+  let files = filter(dict['stdout'], "!empty(v:val)")
+  if empty(files)
+    return []
+  endif
+  return map(files, "FugitiveFind(v:val)")
+endfunction
+
+command! -nargs=? -complete=customlist,UntrackedCompl Untracked
+      \ call s:GetUntracked()->ArgFilter(<q-args>)->DropInQf("Untracked")
+
+function UntrackedCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  return s:GetUntracked(bang)->TailItems(a:ArgLead)
+endfunction
 
 set updatetime=500
 set completeopt=menuone
@@ -709,7 +738,7 @@ function! s:OpenCMakeLists()
   endwhile
 endfunction
 
-command! -nargs=0 CMake call <SID>OpenCMakeLists()
+command! -nargs=0 Cmake call <SID>OpenCMakeLists()
 
 function! s:EditFugitive()
   let actual = bufname()
@@ -959,6 +988,8 @@ function! FindCompl(ArgLead, CmdLine, CursorPos) abort
 endfunction
 
 command! -nargs=+ -complete=customlist,FindCompl Find call QuickFind(<f-args>)
+
+command! -nargs=+ Grepo call QuickGrep(<q-args>, FugitiveWorkTree())
 
 function! s:GetIndex()
   let dir = FugitiveWorkTree()
@@ -1222,7 +1253,7 @@ endfunction
 
 nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
 
-function s:ObsidianMake(type, bang)
+function s:ObsidianMake(...)
   let repo = split(FugitiveWorkTree(), "/")[-1]
   let obsidian_repos = ["obsidian-video", "libalcatraz", "mpp"]
   if index(obsidian_repos, repo) < 0
@@ -1240,13 +1271,16 @@ function s:ObsidianMake(type, bang)
 
   let env = "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux"
 
-  let type = empty(a:type) ? "Debug" : a:type
+  let type = get(a:, 1, "")
+  let bang = get(a:, 2, "")
+
+  let type = empty(type) ? "Debug" : type
   let cmake = printf("cmake -B %s -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=%s", type, type)
   let build = printf("cmake --build %s", type)
 
   let cmds = [env, cxxflags, cflags, cmake, build]
   let command = ["/bin/bash", "-c", join(cmds, ';')]
-  return Make(command, a:bang)
+  return Make(command, bang)
 endfunction
 
 command! -nargs=? -bang -complete=customlist,MakeCompl Make call <SID>ObsidianMake(<q-args>, "<bang>")
@@ -1387,12 +1421,12 @@ endfunction
 function s:InstallRemoteCommands()
   for key in keys(g:remote_map)
     let remote = g:remote_map[key]
-    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start%s call <SID>RemoteDebug(remote, <q-args>)", key)
-    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run%s call <SID>RemoteDebug(remote, <q-args>, <SID>GetDebugLoc())", key)
-    exe printf("command! -nargs=1 Attach%s call <SID>RemoteAttach(remote, <q-args>)", key)
-    exe printf("command! -nargs=? -bang -complete=file Sync%s call <SID>RemoteSync('<bang>', <q-args>, remote)", key)
-    exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs%s call <SID>Sshfs(remote, <q-args>)", key)
-    exe printf("command! -nargs=0 Ssh%s call <SID>SshTerm(remote)", key)
+    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start%s call <SID>RemoteDebug('%s', <q-args>)", key, remote)
+    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run%s call <SID>RemoteDebug('%s', <q-args>, <SID>GetDebugLoc())", key, remote)
+    exe printf("command! -nargs=1 Attach%s call <SID>RemoteAttach('%s', <q-args>)", key, remote)
+    exe printf("command! -nargs=? -bang -complete=file Sync%s call <SID>RemoteSync('<bang>', <q-args>, '%s')", key, remote)
+    exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs%s call <SID>Sshfs('%s', <q-args>)", key, remote)
+    exe printf("command! -nargs=0 Ssh%s call <SID>SshTerm('%s')", key, remote)
   endfor
 endfunction
 
