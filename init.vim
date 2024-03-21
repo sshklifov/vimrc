@@ -421,8 +421,6 @@ function UnstagedCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  " TODO stridx("Unstaged!") is a bug when the command typed is Unst!
-  " TODO in other places as well
   return s:GetUnstaged()->TailItems(a:ArgLead)
 endfunction
 
@@ -1196,14 +1194,15 @@ function s:ObsidianMake(...)
   endif
 
 
+  const sdk = "/opt/aisys/obsidian_10"
   let common_flags = join([
-        \ "-isystem /opt/aisys/obsidian_05/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/",
-        \ "-isystem /opt/aisys/obsidian_05/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/aarch64-aisys-linux",
+        \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/", sdk),
+        \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/aarch64-aisys-linux", sdk),
         \ "-O0 -ggdb -U_FORTIFY_SOURCE"])
   let cxxflags = "export CXXFLAGS=" . string(common_flags)
   let cflags = "export CFLAGS=" . string(common_flags)
 
-  let env = "source /opt/aisys/obsidian_05/environment-setup-armv8a-aisys-linux"
+  let env = printf("source %s/environment-setup-armv8a-aisys-linux", sdk)
 
   let type = get(a:, 1, "")
   let bang = get(a:, 2, "")
@@ -1234,6 +1233,7 @@ function! RemoteExeCompl(ArgLead, CmdLine, CursorPos)
 
   let pat = "*" . a:ArgLead . "*"
   let find = "find /home/root -name " . shellescape(pat) . " -type f -executable"
+  " XXX becuase of E464 this is ok
   if stridx(a:CmdLine, 'Start') == 0
     let host = s:GetHostFromCommand('Start', a:CmdLine)
   else
@@ -1292,6 +1292,7 @@ endfunction
 function! s:Resync()
   " Rerun Make -> Sync commands
   let hist = map(range(-100, -1), 'histget("cmd", v:val)')
+  " XXX becuase of E464 this is ok
   let hist = filter(hist, 'stridx(v:val, "Sync") == 0')
   if empty(hist)
     echo "Cannot rerun, not in history"
@@ -1314,6 +1315,7 @@ command! -nargs=0 Resync call <SID>Resync()
 function! s:Rerun()
   " Rerun last Start / Run command
   let hist = map(range(-100, -1), 'histget("cmd", v:val)')
+  " XXX becuase of E464 this is ok
   let hist = filter(hist, 'stridx(v:val, "Run") == 0 || stridx(v:val, "Start") == 0')
   if empty(hist)
     echo "Cannot rerun, not in history"
@@ -1338,7 +1340,8 @@ if !exists('g:remote_map')
         \ '26': 'root@10.1.20.26',
         \ 'BrokenRGB': 'root@10.1.20.26',
         \ '28': 'root@10.1.20.28',
-        \ 'BrokenIR': 'root@10.1.20.28'
+        \ 'BrokenIR': 'root@10.1.20.28',
+        \ 'P10': 'root@10.1.20.43',
         \ }
 endif
 
