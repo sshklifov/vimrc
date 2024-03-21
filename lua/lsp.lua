@@ -132,7 +132,7 @@ function AcceptAutoCompletion()
   local res = GetAutoCompletion()
   ClearAutoCompletion()
 
-  if vim.fn.pumvisible() then
+  if vim.fn.pumvisible() == 1 then
     return vim.fn.nr2char(25) -- <C-y>
   else
     return res
