@@ -154,6 +154,9 @@ nnoremap <C-w>t <C-w>T
 let mapleader = "\\"
 autocmd SwapExists * let v:swapchoice = "e"
 
+" Increase oldfiles size
+set shada='1000,<0,s50,h
+
 " Disable mouse
 set mouse=
 
@@ -1130,7 +1133,8 @@ function! s:RemoteAttach(host, proc)
   elseif len(pid) < 1
     echo a:proc . " is not running"
   else
-    call s:Debug(#{ssh: machine, proc: pid[0]})
+    let opts = #{ssh: a:host, proc: pid[0]}
+    call s:Debug(opts)
   endif
 endfunction
 
@@ -1193,7 +1197,6 @@ function s:ObsidianMake(...)
     return
   endif
 
-
   const sdk = "/opt/aisys/obsidian_10"
   let common_flags = join([
         \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/", sdk),
@@ -1202,6 +1205,7 @@ function s:ObsidianMake(...)
   let cxxflags = "export CXXFLAGS=" . string(common_flags)
   let cflags = "export CFLAGS=" . string(common_flags)
 
+  let dir = printf("cd %s", FugitiveWorkTree())
   let env = printf("source %s/environment-setup-armv8a-aisys-linux", sdk)
 
   let type = get(a:, 1, "")
@@ -1211,7 +1215,7 @@ function s:ObsidianMake(...)
   let cmake = printf("cmake -B %s -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=%s", type, type)
   let build = printf("cmake --build %s", type)
 
-  let cmds = [env, cxxflags, cflags, cmake, build]
+  let cmds = [dir, env, cxxflags, cflags, cmake, build]
   let command = ["/bin/bash", "-c", join(cmds, ';')]
   return Make(command, bang)
 endfunction
@@ -1226,13 +1230,83 @@ function! MakeCompl(ArgLead, CmdLine, CursorPos)
   return items->ArgFilter(a:ArgLead)
 endfunction
 
+function! s:CheckShellCmd(args)
+  call system(a:args)
+  if v:shell_error != 0
+    echo printf("Failed: %s", join(a:args))
+    return v:false
+  endif
+  return v:true
+endfunction
+
+function! s:RunRtspServer(arg, host)
+  let build_dir = a:arg
+  if empty(build_dir)
+    let build_dir = "Debug"
+  endif
+
+  let cmds = []
+
+  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service"]
+  for elem in stop_list
+    let cmd = "systemctl stop " . elem
+    call add(cmds, cmd)
+  endfor
+
+  let cmd = printf("cp /var/tmp/%s/application/rtsp-server /tmp", build_dir)
+  call add(cmds, cmd)
+
+  let cmd = "setcap cap_sys_nice+ep /tmp/rtsp-server"
+  call add(cmds, cmd)
+
+  let cmd = "sudo -u rtsp-server /tmp/rtsp-server"
+  call add(cmds, cmd)
+
+  tabnew
+  let id = termopen(["ssh", a:host])
+  call cursor("$", 1)
+  call add(cmds, "")
+  call chansend(id, cmds)
+  return id
+endfunction
+
+function! s:RunObsidianVideo(arg, host)
+  let build_dir = a:arg
+  if empty(build_dir)
+    let build_dir = "Debug"
+  endif
+
+  let cmds = []
+
+  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service", "obsidian-video"]
+  for elem in stop_list
+    let cmd = "systemctl stop " . elem
+    call add(cmds, cmd)
+  endfor
+
+  let cmd = printf("cp /var/tmp/%s/application/obsidian-video /tmp", build_dir)
+  call add(cmds, cmd)
+
+  let cmd = "setcap cap_sys_nice+ep /tmp/obsidian-video"
+  call add(cmds, cmd)
+
+  let cmd = "sudo -u rock-video /tmp/obsidian-video"
+  call add(cmds, cmd)
+
+  tabnew
+  let id = termopen(["ssh", a:host])
+  call cursor("$", 1)
+  call add(cmds, "")
+  call chansend(id, cmds)
+endfunction
+
 function! RemoteExeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
 
   let pat = "*" . a:ArgLead . "*"
-  let find = "find /home/root -name " . shellescape(pat) . " -type f -executable"
+  let find = "find /var/tmp -name " . shellescape(pat) . " -type f -executable"
   " XXX becuase of E464 this is ok
   if stridx(a:CmdLine, 'Start') == 0
     let host = s:GetHostFromCommand('Start', a:CmdLine)
@@ -1273,7 +1347,7 @@ function! s:RemoteSync(bang, arg, host)
   if dir[-1:-1] == '/'
     let dir = dir[0:-2]
   endif
-  const remote_dir = a:host . ":/home/root/"
+  const remote_dir = a:host . ":/var/tmp/"
 
   if empty(a:bang)
     let cmd = ["rsync", "-rlt", "--info=progress2", dir, remote_dir]
@@ -1341,6 +1415,7 @@ if !exists('g:remote_map')
         \ 'BrokenRGB': 'root@10.1.20.26',
         \ '28': 'root@10.1.20.28',
         \ 'BrokenIR': 'root@10.1.20.28',
+        \ '43': 'root@10.1.20.43',
         \ 'P10': 'root@10.1.20.43',
         \ }
 endif
@@ -1364,6 +1439,8 @@ function s:InstallRemoteCommands()
     exe printf("command! -nargs=? -bang -complete=file Sync%s call <SID>RemoteSync('<bang>', <q-args>, '%s')", key, remote)
     exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs%s call <SID>Sshfs('%s', <q-args>)", key, remote)
     exe printf("command! -nargs=0 Ssh%s call <SID>SshTerm('%s')", key, remote)
+    exe printf("command! -nargs=? Rtsp%s call <SID>RunRtspServer(<q-args>, '%s')", key, remote)
+    exe printf("command! -nargs=? Video%s call <SID>RunObsidianVideo(<q-args>, '%s')", key, remote)
   endfor
 endfunction
 
