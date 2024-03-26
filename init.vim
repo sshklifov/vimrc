@@ -12,7 +12,6 @@ Plug 'catppuccin/nvim', { 'as': 'catppuccin' }
 
 Plug 'tpope/vim-fugitive'
 Plug 'neovim/nvim-lspconfig'
-Plug 'tpope/vim-sleuth'
 
 Plug 'sshklifov/debug'
 Plug 'sshklifov/qsearch'
@@ -111,7 +110,7 @@ set diffopt+=vertical
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
 nnoremap <silent> <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
 
-" Indentation settings (will be overriden by vim-sleuth)
+" Indentation settings
 set expandtab
 set shiftwidth=2
 set tabstop=2
@@ -156,6 +155,8 @@ autocmd SwapExists * let v:swapchoice = "e"
 
 " Increase oldfiles size
 set shada='1000,<0,s50,h
+" Save undo history
+set undofile
 
 " Disable mouse
 set mouse=
@@ -577,6 +578,9 @@ function! s:Review(bang, arg)
 endfunction
 
 command! -nargs=? -bang -complete=customlist,OriginCompl Review call <SID>Review("<bang>", <q-args>)
+
+" ok?
+nnoremap <silent> <leader>ok :Complete<CR>
 
 function! s:ReviewCompleteFiles(cmd_bang, arg) abort
   if !exists("g:review_stack")
@@ -1145,7 +1149,7 @@ function! s:SshTerm(remote)
 endfunction
 
 function! s:Sshfs(remote, args)
-  silent exe "edit scp://" . a:remote . "/" . a:args
+  silent exe "tabnew scp://" . a:remote . "/" . a:args
 endfunction
 
 function! SshfsCompl(ArgLead, CmdLine, CursorPos)
@@ -1228,15 +1232,6 @@ function! MakeCompl(ArgLead, CmdLine, CursorPos)
   endif
   let items = ["Debug", "Release"]
   return items->ArgFilter(a:ArgLead)
-endfunction
-
-function! s:CheckShellCmd(args)
-  call system(a:args)
-  if v:shell_error != 0
-    echo printf("Failed: %s", join(a:args))
-    return v:false
-  endif
-  return v:true
 endfunction
 
 function! s:RunRtspServer(arg, host)
@@ -1373,15 +1368,8 @@ function! s:Resync()
     return
   endif
 
-  " (1) Build step
+  exe "autocmd! User MakeSuccessful ++once " . hist[-1]
   let make_id = s:ObsidianMake()
-  let exit = jobwait([make_id])
-  if exit[0] != 0
-    return
-  endif
-
-  " (2) Sync step
-  exe hist[-1]
 endfunction
 
 command! -nargs=0 Resync call <SID>Resync()
@@ -1401,6 +1389,8 @@ endfunction
 command! -nargs=0 Rerun call <SID>Rerun()
 
 function! s:Rerere()
+  " TODO
+  throw "If you need this, add an autocmd in Sync"
   call s:Resync()
   call s:Rerun()
 endfunction
