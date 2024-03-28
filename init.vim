@@ -312,6 +312,7 @@ nnoremap <silent> <leader>cd :lcd %:p:h<CR>
 nnoremap <silent> <leader>gcd :Gcd<CR>
 
 nnoremap <silent> <leader>ta :tabnew<CR><C-O>
+nnoremap <silent> <leader>tA :-tabnew<CR><C-O>
 nnoremap <silent> <leader>tc :tabclose<CR>
 
 nnoremap <silent> <leader>unix :set ff=unix<CR>
@@ -872,6 +873,9 @@ function! s:DebugStartPost(args)
   
   if has_key(a:args, "proc")
     call TermDebugSendCommand("attach " . a:args["proc"])
+    if has_key(a:args, "br")
+      call TermDebugSendCommand("tbr " . a:args["br"])
+    endif
   elseif has_key(a:args, "exe")
     let cmdArgs = split(a:args["exe"], " ")
     call TermDebugSendCommand("file " . cmdArgs[0])
@@ -942,7 +946,9 @@ highlight! link LspReferenceWrite LspReferenceText
 
 " Class highlight
 highlight! link @lsp.type.class.cpp @lsp.type.type
+highlight! link @lsp.type.class.c @lsp.type.type
 highlight! link @lsp.type.parameter.cpp @lsp.type.variable
+highlight! link @lsp.type.parameter.c @lsp.type.variable
 highlight! link @lsp.typemod.method.defaultLibrary Function
 highlight! link @lsp.typemod.function.defaultLibrary Function
 
@@ -1137,7 +1143,7 @@ function! s:RemoteAttach(host, proc)
   elseif len(pid) < 1
     echo a:proc . " is not running"
   else
-    let opts = #{ssh: a:host, proc: pid[0]}
+    let opts = #{ssh: a:host, proc: pid[0], br: s:GetDebugLoc()}
     call s:Debug(opts)
   endif
 endfunction
@@ -1175,19 +1181,22 @@ endfunction
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:ResolveEnvFile()
   let fname = expand("%:f")
-  let idx = stridx(fname, "include/alcatraz")
-  if idx >= 0
+  let resolved = ""
+  if stridx(fname, "include/alcatraz") >= 0
+    let idx = stridx(fname, "include/alcatraz")
     let resolved = "/home/stef/libalcatraz/" . fname[idx:]
-    if filereadable(resolved)
-      let pos = getcurpos()[1:]
-      let view = winsaveview()
-      exe "edit " . resolved
-      call winrestview(view)
-    else
-      echo "Sorry, I'm buggy, Update me!"
-    endif
+  elseif stridx(fname, "include/rockchip")
+    let basename = fnamemodify(fname, ":t")
+    let resolved = "/home/stef/mpp/inc/" . basename
+  endif
+
+  if filereadable(resolved)
+    let pos = getcurpos()[1:]
+    let view = winsaveview()
+    exe "edit " . resolved
+    call winrestview(view)
   else
-    echo "Sorry, no idea. Update me!"
+    echo "Sorry, I'm buggy, Update me!"
   endif
 endfunction
 
