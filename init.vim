@@ -451,9 +451,9 @@ function UntrackedCompl(ArgLead, CmdLine, CursorPos)
   return s:GetUntracked(bang)->TailItems(a:ArgLead)
 endfunction
 
+" CursorHold time
 set updatetime=500
 set completeopt=menuone,noinsert
-inoremap <silent> <C-Space> <C-X><C-O>
 
 " http://vim.wikia.com/wiki/Automatically_append_closing_characters
 inoremap {<CR> {<CR>}<C-o>O
@@ -769,8 +769,24 @@ nnoremap <silent> ]n :call <SID>Context(v:false)<CR>
 """"""""""""""""""""""""""""DEBUGGING"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-command! -nargs=? -complete=customlist,ExeCompl Start call s:Debug({"exe": empty(<q-args>) ? "a.out" : <q-args>})
-command! -nargs=? -complete=customlist,ExeCompl Run call s:Debug({"exe": empty(<q-args>) ? "a.out" : <q-args>, "br": <SID>GetDebugLoc()})
+function! s:StartDebug(exe)
+  let exe = empty(a:exe) ? "a.out" : a:exe
+  let opts = {"exe": exe}
+  call s:Debug(opts)
+endfunction
+
+command! -nargs=? -complete=customlist,ExeCompl Start call s:StartDebug(<q-args>)
+
+function! s:RunDebug(exe)
+  let exe = empty(a:exe) ? "a.out" : a:exe
+  let br_cmd = "br " . s:GetDebugLoc()
+  let run_cmd = "c"
+  
+  let opts = #{exe: exe, cmds: [br_cmd, run_cmd]}
+  call s:Debug(opts)
+endfunction
+
+command! -nargs=? -complete=customlist,ExeCompl Run call s:RunDebug(<q-args>)
 
 function! ExeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -784,7 +800,21 @@ function! ExeCompl(ArgLead, CmdLine, CursorPos)
   return systemlist(cmd)
 endfunction
 
-command! -nargs=1 -complete=customlist,AttachCompl Attach call s:Debug({"proc": <q-args>})
+function! s:AttachDebug(proc)
+  let pids = systemlist(["pgrep", "-f", proc])
+  " Report error
+  if len(pids) == 0
+    echo "No processes found"
+    return
+  elseif len(pids) > 1
+    echo "Multiple processes found"
+    return
+  endif
+  let opts = #{proc: pids[0]}
+  call s:Debug(opts)
+endfunction
+
+command! -nargs=1 -complete=customlist,AttachCompl Attach call s:AttachDebug(<q-args>)
 
 function! AttachCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -805,39 +835,25 @@ endfunction
 
 " Available modes:
 " - exe. Pass executable + arguments
-" - proc. Process name or pid to attach.
+" - proc. Process pid to attach.
 " Other arguments:
 " - symbols. Whether to load symbols or not. Used for faster loading of gdb.
 " - ssh. Launch GDB over ssh with the given address.
-" - br. Works only with exe mode. Will run process and place a breakpoint.
+" - cmds. Additional commands to execute once the inferior is loaded
 function! s:Debug(args)
   if TermDebugIsOpen()
     echoerr 'Terminal debugger already running, cannot run two'
     return
   endif
 
-  " Resolve process name early
-  let proc = get(a:args, "proc", "")
-  if proc !~ "^[0-9]*$"
-    let pids = systemlist(["pgrep", "-f", proc])
-    " Report error
-    if len(pids) == 0
-      echo "No processes found"
-      return
-    elseif len(pids) > 1
-      echo "Multiple processes found"
-      return
-    endif
-    " Resolve to pid
-    let a:args["proc"] = pids[0]
-  endif
-
   " Clear old autocmds
-  autocmd! User TermdebugStopPre
   autocmd! User TermdebugStartPost
+  autocmd! User TermdebugStopPre
+  autocmd! User TermdebugPidPost
   " Install new autocmds
   autocmd User TermdebugStopPre call s:DebugStopPre()
   exe "autocmd User TermdebugStartPost call s:DebugStartPost(" . string(a:args) . ")"
+  exe "autocmd User TermdebugPidPost call s:DebugPidPost(" . string(a:args) . ")"
 
   if has_key(a:args, "ssh")
     call TermDebugStartSSH(a:args["ssh"])
@@ -847,7 +863,7 @@ function! s:Debug(args)
 endfunction
 
 function! s:DebugStartPost(args)
-  let quickLoad = has_key(a:args, "symbols") && !a:args["symbols"]
+  let quick_load = has_key(a:args, "symbols") && !a:args["symbols"]
 
   nnoremap <silent> <leader>v :call TermDebugSendCommand("p " . expand('<cword>'))<CR>
   vnoremap <silent> <leader>v :call TermDebugSendCommand("p " . <SID>GetRangeExpr())<CR>
@@ -867,47 +883,39 @@ function! s:DebugStartPost(args)
   call TermDebugSendCommand("set print object on")
   call TermDebugSendCommand("set breakpoint pending on")
   call TermDebugSendCommand("set debuginfod enabled off")
-  if quickLoad
+  if quick_load
     call TermDebugSendCommand("set auto-solib-add off")
   endif
   
   if has_key(a:args, "proc")
     call TermDebugSendCommand("attach " . a:args["proc"])
-    if has_key(a:args, "br")
-      call TermDebugSendCommand("tbr " . a:args["br"])
-    endif
   elseif has_key(a:args, "exe")
     let cmdArgs = split(a:args["exe"], " ")
     call TermDebugSendCommand("file " . cmdArgs[0])
     if len(cmdArgs) > 1
       call TermDebugSendCommand("set args " . join(cmdArgs[1:], " "))
     endif
-    " Either start or run process
-    if has_key(a:args, "br")
-      call TermDebugSendCommand("tbr " . a:args["br"])
-      call TermDebugSendCommand("run")
-    else
-      call TermDebugSendCommand("start")
-    endif
-  endif
-
-  if TermDebugGetPid() > 0
-    call TermDebugSendCommand("set scheduler-locking step")
-    call TermDebugSendCommand("set disassembly-flavor intel")
+    call TermDebugSendCommand("start")
   endif
 endfunction
 
-function! s:DebugStopPre()
-  if exists(":Source")
-    execute "Source" | setlocal so=4
-  endif
+function! s:DebugPidPost(args)
+  call TermDebugSendCommand("set scheduler-locking step")
+  " Not on arm: call TermDebugSendCommand("set disassembly-flavor intel")
 
-  silent! nunmap <silent> <leader>v
-  silent! vunmap <silent> <leader>v
-  silent! nunmap <silent> <leader>br
-  silent! nunmap <silent> <leader>tbr
-  silent! nunmap <silent> <leader>unt
-  silent! nunmap <silent> <leader>pc
+  let cmds = get(a:args, "cmds", [])
+  for cmd in cmds
+    call TermDebugSendCommand(cmd)
+  endfor
+endfunction
+
+function! s:DebugStopPre()
+  silent! nunmap <leader>v
+  silent! vunmap <leader>v
+  silent! nunmap <leader>br
+  silent! nunmap <leader>tbr
+  silent! nunmap <leader>unt
+  silent! nunmap <leader>pc
 endfunction
 
 function! s:GetDebugLoc()
@@ -1125,14 +1133,22 @@ command! -nargs=0 Instances call <SID>Instances()
 
 """"""""""""""""""""""""""""REMOTE"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-function! s:RemoteDebug(host, exe, ...)
+function! s:RemoteStart(host, exe)
   let debug_args = #{ssh: a:host}
   if !empty(a:exe)
     let debug_args['exe'] = a:exe
   endif
-  if a:0 > 0
-    let debug_args['br'] = a:1
+  call s:Debug(debug_args)
+endfunction
+
+function! s:RemoteRun(host, exe)
+  let debug_args = #{ssh: a:host}
+  if !empty(a:exe)
+    let debug_args['exe'] = a:exe
   endif
+  let br_cmd = 'br ' . s:GetDebugLoc()
+  let run_cmd = 'c'
+  let debug_args['cmds'] = [br_cmd, run_cmd]
   call s:Debug(debug_args)
 endfunction
 
@@ -1140,12 +1156,17 @@ function! s:RemoteAttach(host, proc)
   let pid = systemlist(["ssh", "-o", "ConnectTimeout=1", a:host, "pgrep " . a:proc])
   if len(pid) > 1
     echo "Multiple instances of " . a:proc
+    return
   elseif len(pid) < 1
-    echo a:proc . " is not running"
-  else
-    let opts = #{ssh: a:host, proc: pid[0], br: s:GetDebugLoc()}
-    call s:Debug(opts)
+    echo "Cannot attach: " . a:proc . " is not running"
+    return
   endif
+
+  let br_cmd = 'br ' . s:GetDebugLoc()
+  let spin_cmd = 'call spinoff()'
+  let run_cmd = 'c'
+  let opts = #{ssh: a:host, proc: pid[0], cmds: [br_cmd, spin_cmd, run_cmd]}
+  call s:Debug(opts)
 endfunction
 
 function! s:SshTerm(remote)
@@ -1377,7 +1398,8 @@ function! s:Resync()
     return
   endif
 
-  exe "autocmd! User MakeSuccessful ++once " . hist[-1]
+  let hist_cmd = printf("win_execute(%d, %s)", win_getid(), string(hist[-1]))
+  exe "autocmd! User MakeSuccessful ++once call " . hist_cmd
   let make_id = s:ObsidianMake()
 endfunction
 
@@ -1432,8 +1454,8 @@ endfunction
 function s:InstallRemoteCommands()
   for key in keys(g:remote_map)
     let remote = g:remote_map[key]
-    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start%s call <SID>RemoteDebug('%s', <q-args>)", key, remote)
-    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run%s call <SID>RemoteDebug('%s', <q-args>, <SID>GetDebugLoc())", key, remote)
+    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start%s call <SID>RemoteStart('%s', <q-args>)", key, remote)
+    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run%s call <SID>RemoteRun('%s', <q-args>)", key, remote)
     exe printf("command! -nargs=1 Attach%s call <SID>RemoteAttach('%s', <q-args>)", key, remote)
     exe printf("command! -nargs=? -bang -complete=file Sync%s call <SID>RemoteSync('<bang>', <q-args>, '%s')", key, remote)
     exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs%s call <SID>Sshfs('%s', <q-args>)", key, remote)
