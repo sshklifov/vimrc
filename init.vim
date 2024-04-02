@@ -38,9 +38,6 @@ let tabulousCloseStr = ''
 let g:netrw_hide = 1
 let g:netrw_banner = 0
 
-" sshklifov/debug
-let g:termdebug_capture_msgs = 1
-
 " sshklifov/qsearch
 let g:qsearch_exclude_dirs = [".cache", ".git", "Debug", "Release", "build"]
 let g:qsearch_exclude_files = ["compile_commands.json"]
@@ -454,6 +451,7 @@ endfunction
 " CursorHold time
 set updatetime=500
 set completeopt=menuone,noinsert
+set pumheight=5
 
 " http://vim.wikia.com/wiki/Automatically_append_closing_characters
 inoremap {<CR> {<CR>}<C-o>O
@@ -768,6 +766,10 @@ nnoremap <silent> ]n :call <SID>Context(v:false)<CR>
 
 """"""""""""""""""""""""""""DEBUGGING"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+command! -nargs=0 Capture exe "tab sb " . TermDebugCaptureNr()
+command! -nargs=0 Asm call TermDebugToggleAsm()
+command! -nargs=0 Gdb call TermDebugGoToGdb()
+command! -nargs=0 Up call TermDebugFindSource()
 
 function! s:StartDebug(exe)
   let exe = empty(a:exe) ? "a.out" : a:exe
@@ -846,17 +848,13 @@ function! s:Debug(args)
     return
   endif
 
-  " Clear old autocmds
-  autocmd! User TermdebugStartPost
-  autocmd! User TermdebugStopPre
-  autocmd! User TermdebugPidPost
   " Install new autocmds
-  autocmd User TermdebugStopPre call s:DebugStopPre()
-  exe "autocmd User TermdebugStartPost call s:DebugStartPost(" . string(a:args) . ")"
-  exe "autocmd User TermdebugPidPost call s:DebugPidPost(" . string(a:args) . ")"
+  autocmd! User TermDebugStopPre call s:DebugStopPre()
+  exe "autocmd! User TermDebugStartPost call s:DebugStartPost(" . string(a:args) . ")"
+  exe "autocmd! User TermDebugRunPost call s:DebugRunPost(" . string(a:args) . ")"
 
   if has_key(a:args, "ssh")
-    call TermDebugStartSSH(a:args["ssh"])
+    call TermDebugStart(a:args["ssh"])
   else
     call TermDebugStart()
   endif
@@ -865,11 +863,12 @@ endfunction
 function! s:DebugStartPost(args)
   let quick_load = has_key(a:args, "symbols") && !a:args["symbols"]
 
-  nnoremap <silent> <leader>v :call TermDebugSendCommand("p " . expand('<cword>'))<CR>
-  vnoremap <silent> <leader>v :call TermDebugSendCommand("p " . <SID>GetRangeExpr())<CR>
+  nnoremap <silent> <leader>v :call TermDebugEvaluate(expand('<cword>'))<CR>
+  vnoremap <silent> <leader>v :call TermDebugEvaluate(<SID>GetRangeExpr())<CR>
+
   nnoremap <silent> <leader>br :call TermDebugSendCommand("br " . <SID>GetDebugLoc())<CR>
   nnoremap <silent> <leader>tbr :call TermDebugSendCommand("tbr " . <SID>GetDebugLoc())<CR>
-  nnoremap <silent> <leader>unt :call TermDebugSendCommand("tbr " . <SID>GetDebugLoc())<BAR>call TermDebugSendCommand("c")<CR>
+  nnoremap <silent> <leader>unt :call TermDebugSendCommand(["tbr " . <SID>GetDebugLoc(), "c"])<CR>
   nnoremap <silent> <leader>pc :call TermDebugGoToPC()<CR>
 
   call TermDebugSendCommand("set debug-file-directory /dev/null")
@@ -899,14 +898,11 @@ function! s:DebugStartPost(args)
   endif
 endfunction
 
-function! s:DebugPidPost(args)
+function! s:DebugRunPost(args)
   call TermDebugSendCommand("set scheduler-locking step")
-  " Not on arm: call TermDebugSendCommand("set disassembly-flavor intel")
 
   let cmds = get(a:args, "cmds", [])
-  for cmd in cmds
-    call TermDebugSendCommand(cmd)
-  endfor
+  call TermDebugSendCommand(cmds)
 endfunction
 
 function! s:DebugStopPre()
@@ -919,24 +915,19 @@ function! s:DebugStopPre()
 endfunction
 
 function! s:GetDebugLoc()
-  const absolute = v:false
-  if absolute
-    let file = expand("%:p")
-  else
-    let file = expand("%:t")
-  endif
-  let ln = line(".")
-  return file.":".ln
+  let basename = expand("%:t")
+  let lnum = line(".")
+  return printf("%s:%d", basename, lnum)
 endfunction
 
 function! s:GetRangeExpr()
   let [lnum1, col1] = getpos("'<")[1:2]
   let [lnum2, col2] = getpos("'>")[1:2]
+
   let lines = getline(lnum1, lnum2)
   let lines[-1] = lines[-1][:col2 - 1]
   let lines[0] = lines[0][col1 - 1:]
-  let expr = join(lines, "\n")
-  return expr
+  return join(lines, " ")
 endfunction
 "}}}
 
