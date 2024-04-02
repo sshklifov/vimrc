@@ -1030,6 +1030,25 @@ endfunction
 
 command! -nargs=? -complete=customlist,IndexCompl Index call s:GetIndex()->ArgFilter(<q-args>)->DropInQf('Index')
 
+function! s:GetSource()
+  let dir = FugitiveWorkTree()
+  if !isdirectory(dir)
+    return []
+  endif
+  let source = ["c", "cc", "cp", "cxx", "cpp", "CPP", "c++", "C"]
+  let regex = '.*\.\(' . join(source, '\|') . '\)'
+  return Find(dir, "-regex", regex)
+endfunction
+
+function! SourceCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  return s:GetSource()->TailItems(a:ArgLead)
+endfunction
+
+command! -nargs=? -complete=customlist,SourceCompl Source call s:GetSource()->ArgFilter(<q-args>)->DropInQf('Source')
+
 function! s:GetWorkFiles()
   let dir = FugitiveWorkTree()
   if !isdirectory(dir)
