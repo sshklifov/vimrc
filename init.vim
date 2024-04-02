@@ -1177,8 +1177,51 @@ endfunction
 
 "}}}
 
-""""""""""""""""""""""""""""Context dependent"""""""""""""""""""""""""""" {{{
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Context dependent
+
+""""""""""""""""""""""""""""Building"""""""""""""""""""""""""""" {{{
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+let s:build_type = "Debug"
+
+function s:ObsidianMake(...)
+  let repo = split(FugitiveWorkTree(), "/")[-1]
+  let obsidian_repos = ["obsidian-video", "libalcatraz", "mpp"]
+  if index(obsidian_repos, repo) < 0
+    echo "Unsupported repo: " . repo
+    return
+  endif
+
+  const sdk = "/opt/aisys/obsidian_10"
+  let common_flags = join([
+        \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/", sdk),
+        \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/aarch64-aisys-linux", sdk),
+        \ "-O0 -ggdb -U_FORTIFY_SOURCE"])
+  let cxxflags = "export CXXFLAGS=" . string(common_flags)
+  let cflags = "export CFLAGS=" . string(common_flags)
+
+  let dir = printf("cd %s", FugitiveWorkTree())
+  let env = printf("source %s/environment-setup-armv8a-aisys-linux", sdk)
+
+  let cmake = printf("cmake -B %s -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=%s", s:build_type, s:build_type)
+  let build = printf("cmake --build %s", s:build_type)
+
+  let cmds = [dir, env, cxxflags, cflags, cmake, build]
+  let command = ["/bin/bash", "-c", join(cmds, ';')]
+
+  let bang = get(a:, 1, "")
+  return Make(command, bang)
+endfunction
+
+command! -nargs=? -bang -complete=customlist,MakeCompl Make call <SID>ObsidianMake(<q-args>, "<bang>")
+
+function! MakeCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  let items = ["Debug", "Release"]
+  return items->ArgFilter(a:ArgLead)
+endfunction
+
 function! s:ResolveEnvFile()
   let fname = expand("%:f")
   let resolved = ""
@@ -1201,126 +1244,37 @@ function! s:ResolveEnvFile()
 endfunction
 
 nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
+"}}}
 
-function s:ObsidianMake(...)
-  let repo = split(FugitiveWorkTree(), "/")[-1]
-  let obsidian_repos = ["obsidian-video", "libalcatraz", "mpp"]
-  if index(obsidian_repos, repo) < 0
-    echo "Unsupported repo: " . repo
-    return
-  endif
-
-  const sdk = "/opt/aisys/obsidian_10"
-  let common_flags = join([
-        \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/", sdk),
-        \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/aarch64-aisys-linux", sdk),
-        \ "-O0 -ggdb -U_FORTIFY_SOURCE"])
-  let cxxflags = "export CXXFLAGS=" . string(common_flags)
-  let cflags = "export CFLAGS=" . string(common_flags)
-
-  let dir = printf("cd %s", FugitiveWorkTree())
-  let env = printf("source %s/environment-setup-armv8a-aisys-linux", sdk)
-
-  let type = get(a:, 1, "")
-  let bang = get(a:, 2, "")
-
-  let type = empty(type) ? "Debug" : type
-  let cmake = printf("cmake -B %s -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=%s", type, type)
-  let build = printf("cmake --build %s", type)
-
-  let cmds = [dir, env, cxxflags, cflags, cmake, build]
-  let command = ["/bin/bash", "-c", join(cmds, ';')]
-  return Make(command, bang)
-endfunction
-
-command! -nargs=? -bang -complete=customlist,MakeCompl Make call <SID>ObsidianMake(<q-args>, "<bang>")
-
-function! MakeCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  let items = ["Debug", "Release"]
-  return items->ArgFilter(a:ArgLead)
-endfunction
-
-function! s:RunRtspServer(arg, host)
-  let build_dir = a:arg
-  if empty(build_dir)
-    let build_dir = "Debug"
-  endif
-
-  let cmds = []
-
-  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service"]
-  for elem in stop_list
-    let cmd = "systemctl stop " . elem
-    call add(cmds, cmd)
-  endfor
-
-  let cmd = printf("cp /var/tmp/%s/application/rtsp-server /tmp", build_dir)
-  call add(cmds, cmd)
-
-  let cmd = "setcap cap_sys_nice+ep /tmp/rtsp-server"
-  call add(cmds, cmd)
-
-  let cmd = "sudo -u rtsp-server /tmp/rtsp-server"
-  call add(cmds, cmd)
-
-  tabnew
-  let id = termopen(["ssh", a:host])
-  call cursor("$", 1)
-  call add(cmds, "")
-  call chansend(id, cmds)
-  return id
-endfunction
-
-function! s:RunObsidianVideo(arg, host)
-  let build_dir = a:arg
-  if empty(build_dir)
-    let build_dir = "Debug"
-  endif
-
-  let cmds = []
-
-  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service", "obsidian-video"]
-  for elem in stop_list
-    let cmd = "systemctl stop " . elem
-    call add(cmds, cmd)
-  endfor
-
-  let cmd = printf("cp /var/tmp/%s/application/obsidian-video /tmp", build_dir)
-  call add(cmds, cmd)
-
-  let cmd = "setcap cap_sys_nice+ep /tmp/obsidian-video"
-  call add(cmds, cmd)
-
-  let cmd = "sudo -u rock-video /tmp/obsidian-video"
-  call add(cmds, cmd)
-
-  tabnew
-  let id = termopen(["ssh", a:host])
-  call cursor("$", 1)
-  call add(cmds, "")
-  call chansend(id, cmds)
-endfunction
-
+""""""""""""""""""""""""""""Host commands"""""""""""""""""""""""""""" {{{
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! RemoteExeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-
   let pat = "*" . a:ArgLead . "*"
   let find = "find /var/tmp -name " . shellescape(pat) . " -type f -executable"
-  " XXX becuase of E464 this is ok
-  if stridx(a:CmdLine, 'Start') == 0
-    let host = s:GetHostFromCommand('Start', a:CmdLine)
-  else
-    let host = s:GetHostFromCommand('Run', a:CmdLine)
-  endif
-  return systemlist(["ssh", "-o", "ConnectTimeout=1", host, find])
+  return systemlist(["ssh", "-o", "ConnectTimeout=1", s:host, find])
 endfunction
 
-function! s:RemoteSync(bang, arg, host)
+function! SshfsCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+
+  if empty(a:ArgLead)
+    return systemlist(["ssh", host, "find / -maxdepth 1"])
+  else
+    let dirname = fnamemodify(a:ArgLead, ':h')
+    let remote_dirs = systemlist(["ssh", s:host, "find " . dirname . " -maxdepth 1 -type d"])
+    let remote_dirs = map(remote_dirs, 'v:val . "/"')
+    let remote_files = systemlist(["ssh", s:host, "find " . dirname . " -maxdepth 1 -type f"])
+    let total = remote_dirs + remote_files
+    return filter(total, 'stridx(v:val, a:ArgLead) == 0')
+  endif
+endfunction
+
+function! s:RemoteSync(arg, ...)
   function! OnStdout(id, data, event)
     for data in a:data
       let text = substitute(data, '\n', '', 'g')
@@ -1342,7 +1296,7 @@ function! s:RemoteSync(bang, arg, host)
     let g:statusline_dict['sync'] = ''
   endfunction
 
-  let dir = empty(a:arg) ? FugitiveFind("Debug") : fnamemodify(a:arg, ":p")
+  let dir = a:arg
   if !isdirectory(dir) && !filereadable(dir)
     echo "Not found: " . dir
     return
@@ -1351,9 +1305,10 @@ function! s:RemoteSync(bang, arg, host)
   if dir[-1:-1] == '/'
     let dir = dir[0:-2]
   endif
-  const remote_dir = a:host . ":/var/tmp/"
+  const remote_dir = s:host . ":/var/tmp/"
 
-  if empty(a:bang)
+  let bang = get(a:000, 0, "")
+  if empty(bang)
     let cmd = ["rsync", "-rlt", "--info=progress2", dir, remote_dir]
     let opts = #{on_stdout: funcref("OnStdout"), on_exit: funcref("OnExit")}
     return jobstart(cmd, opts)
@@ -1365,6 +1320,195 @@ function! s:RemoteSync(bang, arg, host)
     call cursor("$", 1)
     return id
   endif
+endfunction
+
+function! s:Resync()
+  let dir = FugitiveFind(s:build_type)
+  exe printf("autocmd! User MakeSuccessful ++once call s:RemoteSync('%s')", dir)
+  call s:ObsidianMake()
+endfunction
+
+command! -nargs=0 Resync call s:Resync()
+
+if !exists('s:host_map')
+  const s:host_map = {
+        \ '14': 'root@10.1.20.14',
+        \ 'Miro': 'root@10.1.20.14',
+        \ '26': 'root@10.1.20.26',
+        \ 'BrokenRGB': 'root@10.1.20.26',
+        \ '28': 'root@10.1.20.28',
+        \ 'BrokenIR': 'root@10.1.20.28',
+        \ '43': 'root@10.1.20.43',
+        \ 'P10': 'root@10.1.20.43',
+        \ }
+endif
+
+function s:ChangeHost(key)
+  let s:host = s:host_map[a:key]
+  exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start call <SID>RemoteStart('%s', <q-args>)", s:host)
+  exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run call <SID>RemoteRun('%s', <q-args>)", s:host)
+  exe printf("command! -nargs=1 Attach call <SID>RemoteAttach('%s', <q-args>)", s:host)
+  exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs call <SID>Sshfs('%s', <q-args>)", s:host)
+endfunction
+
+command! -nargs=1 -complete=customlist,ChangeHostCompl Host call s:ChangeHost(<q-args>)
+
+function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  return keys(s:host_map)
+endfunction
+
+call s:ChangeHost('P10')
+"}}}
+
+""""""""""""""""""""""""""""Applications"""""""""""""""""""""""""""" {{{
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+let s:job_list = []
+function! s:RunObsidianVideo()
+  let bufname = 'Obsidian video'
+  if bufexists(bufname)
+    echo "Already running"
+    return
+  endif
+
+  let cmds = []
+
+  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service", "obsidian-video"]
+  for elem in stop_list
+    let cmd = "systemctl stop " . elem
+    call add(cmds, cmd)
+  endfor
+
+  let cmd = printf("cp /var/tmp/%s/application/obsidian-video /tmp", s:build_type)
+  call add(cmds, cmd)
+
+  let cmd = "setcap cap_sys_nice+ep /tmp/obsidian-video"
+  call add(cmds, cmd)
+
+  let cmd = "sudo -u rock-video /tmp/obsidian-video"
+  call add(cmds, cmd)
+
+  tabnew
+  let id = termopen(["ssh", s:host])
+  call cursor("$", 1)
+  call add(cmds, "")
+  call chansend(id, cmds)
+
+  exe "file " . bufname
+  call add(s:job_list, id)
+endfunction
+
+command! -nargs=0 Video call <SID>RunObsidianVideo()
+
+function! s:RunRtspServer()
+  let bufname = 'Rtsp server'
+  if bufexists(bufname)
+    echo "Already running"
+    return
+  endif
+
+  let cmds = []
+
+  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service"]
+  for elem in stop_list
+    let cmd = "systemctl stop " . elem
+    call add(cmds, cmd)
+  endfor
+
+  let cmd = printf("cp /var/tmp/%s/application/rtsp-server /tmp", s:build_type)
+  call add(cmds, cmd)
+
+  let cmd = "setcap cap_sys_nice+ep /tmp/rtsp-server"
+  call add(cmds, cmd)
+
+  let cmd = "sudo -u rtsp-server /tmp/rtsp-server"
+  call add(cmds, cmd)
+
+  tabnew
+  let id = termopen(["ssh", s:host])
+  call cursor("$", 1)
+  call add(cmds, "")
+  call chansend(id, cmds)
+
+  call add(s:job_list, id)
+  exe "file " . bufname
+endfunction
+
+command! -nargs=0 Rtsp call <SID>RunRtspServer()
+
+function! s:KillApplications()
+  for id in s:job_list
+    let chan_info = nvim_get_chan_info(id)
+    call jobstop(id)
+    if has_key(chan_info, 'buffer')
+      exe "bwipe! " . chan_info['buffer']
+    endif
+  endfor
+  let s:job_list = []
+endfunction
+
+command! -nargs=0 Kill call <SID>KillApplications()
+
+function! s:SetObsidianSpin(basename, state)
+  let origw = win_getid()
+  exe "split /home/stef/obsidian-video/application/src/" . a:basename
+  if search("spinoff();") <= 0
+    echo "Missing bootstrap code for spinning"
+    call win_gotoid(origw)
+    return
+  endif
+
+  let state = (getline('.') =~ "//")
+  if state != a:state
+    Commentary
+    write
+    Resync
+  else
+  quit
+  call win_gotoid(origw)
+endfunction
+
+command! -nargs=0 -bang SpinVideo call s:SetObsidianSpin("obsidian_video.cc", <bang>1)
+command! -nargs=0 -bang SpinRtsp call s:SetObsidianSpin("rtsp_server.cc", <bang>1)
+"}}}
+
+nnoremap <silent> <leader>k <cmd>Kill<CR>
+nnoremap <silent> <leader>re <cmd>Resync<CR>
+nnoremap <silent> <leader>rv <cmd>Video<CR>
+nnoremap <silent> <leader>rs <cmd>Rtsp<CR>
+nnoremap <silent> <leader>av <cmd>Attach video<CR>
+nnoremap <silent> <leader>ar <cmd>Attach rtsp<CR>
+
+""""""""""""""""""""""""""""TODO"""""""""""""""""""""""""""" {{{
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function! DecodeH264Packet()
+  call system(["ssh", "p10", "/var/tmp/Debug/test/mpi_dec_test -i /tmp/packet.h264 -o /tmp/packet.nv12 -w 1920 -h 1072 -f 0"])
+  if v:shell_error
+    echo "Decoding h264 packet failed!"
+    return
+  endif
+
+  call system(["ssh", "p10", "[ -s /tmp/packet.nv12 ]"])
+  if v:shell_error
+    echo "Empty nv12 frame!"
+    return
+  endif
+
+  call system(["scp", "p10:/tmp/packet.nv12", "/home/stef/Downloads"])
+  if v:shell_error
+    echo "Copy packet to machine failed!"
+    return
+  endif
+
+  call system("ffmpeg -y -f rawvideo -pix_fmt nv12 -s 1920x1072 -i /home/stef/Downloads/packet.nv12 -f image2 -pix_fmt rgb24 /home/stef/Downloads/packet.png")
+  if v:shell_error
+    echo "Converting nv12 packet to png failed!"
+    return
+  endif
+
+  echom "Done with Downloads/packet.png"
 endfunction
 
 function! s:HistFind(...)
@@ -1384,20 +1528,6 @@ function! s:HistFind(...)
   endif
 endfunction
 
-function! s:Resync()
-  let hist_cmd = s:HistFind("Sync")
-  if empty(hist_cmd)
-    echo "Cannot rerun, not in history"
-    return
-  endif
-
-  let hist_cmd = printf("win_execute(%d, %s)", win_getid(), string(hist_cmd))
-  exe "autocmd! User MakeSuccessful ++once call " . hist_cmd
-  call s:ObsidianMake()
-endfunction
-
-command! -nargs=0 Resync call <SID>Resync()
-
 function! s:Rerun(...)
   if a:0 == 0
     return
@@ -1410,56 +1540,6 @@ function! s:Rerun(...)
     exe hist_cmd
   endif
 endfunction
-
-command! -nargs=0 Rerun call <SID>Rerun()
-
-function! s:Rerere()
-  " TODO
-  throw "If you need this, add an autocmd in Sync"
-  call s:Resync()
-  call s:Rerun()
-endfunction
-
-command! -nargs=0 -bang Rerere call <SID>Rerere()
-
-if !exists('g:remote_map')
-  const g:remote_map = {
-        \ '14': 'root@10.1.20.14',
-        \ 'Miro': 'root@10.1.20.14',
-        \ '26': 'root@10.1.20.26',
-        \ 'BrokenRGB': 'root@10.1.20.26',
-        \ '28': 'root@10.1.20.28',
-        \ 'BrokenIR': 'root@10.1.20.28',
-        \ '43': 'root@10.1.20.43',
-        \ 'P10': 'root@10.1.20.43',
-        \ }
-endif
-
-function! s:GetHostFromCommand(cmdbase, cmdline) abort
-  let part = a:cmdline[len(a:cmdbase):]
-  for key in keys(g:remote_map)
-    if stridx(part, key) == 0
-      return g:remote_map[key]
-    endif
-  endfor
-  echoerr "FIXME"
-endfunction
-
-function s:InstallRemoteCommands()
-  for key in keys(g:remote_map)
-    let remote = g:remote_map[key]
-    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start%s call <SID>RemoteStart('%s', <q-args>)", key, remote)
-    exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run%s call <SID>RemoteRun('%s', <q-args>)", key, remote)
-    exe printf("command! -nargs=1 Attach%s call <SID>RemoteAttach('%s', <q-args>)", key, remote)
-    exe printf("command! -nargs=? -bang -complete=file Sync%s call <SID>RemoteSync('<bang>', <q-args>, '%s')", key, remote)
-    exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs%s call <SID>Sshfs('%s', <q-args>)", key, remote)
-    exe printf("command! -nargs=0 Ssh%s call <SID>SshTerm('%s')", key, remote)
-    exe printf("command! -nargs=? Rtsp%s call <SID>RunRtspServer(<q-args>, '%s')", key, remote)
-    exe printf("command! -nargs=? Video%s call <SID>RunObsidianVideo(<q-args>, '%s')", key, remote)
-  endfor
-endfunction
-
-call s:InstallRemoteCommands()
 "}}}
 
 " Go back to default autocommand group
