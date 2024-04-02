@@ -1407,33 +1407,48 @@ function! s:RemoteSync(bang, arg, host)
   endif
 endfunction
 
-function! s:Resync()
-  " Rerun Make -> Sync commands
-  let hist = map(range(-100, -1), 'histget("cmd", v:val)')
+function! s:HistFind(...)
   " XXX becuase of E464 this is ok
-  let hist = filter(hist, 'stridx(v:val, "Sync") == 0')
+  let f_list = []
+  for cmd_prefix in a:000
+    call add(f_list, printf('stridx(v:val, "%s") == 0', cmd_prefix))
+  endfor
+  let f_str = join(f_list, ' || ')
+
+  let hist = map(range(1, histnr(':')), 'histget(":", v:val)')
+  let hist = filter(hist, f_str)
   if empty(hist)
+    return ""
+  else
+    return hist[-1]
+  endif
+endfunction
+
+function! s:Resync()
+  let hist_cmd = s:HistFind("Sync")
+  if empty(hist_cmd)
     echo "Cannot rerun, not in history"
     return
   endif
 
-  let hist_cmd = printf("win_execute(%d, %s)", win_getid(), string(hist[-1]))
+  let hist_cmd = printf("win_execute(%d, %s)", win_getid(), string(hist_cmd))
   exe "autocmd! User MakeSuccessful ++once call " . hist_cmd
-  let make_id = s:ObsidianMake()
+  call s:ObsidianMake()
 endfunction
 
 command! -nargs=0 Resync call <SID>Resync()
 
-function! s:Rerun()
-  " Rerun last Start / Run command
-  let hist = map(range(-100, -1), 'histget("cmd", v:val)')
-  " XXX becuase of E464 this is ok
-  let hist = filter(hist, 'stridx(v:val, "Run") == 0 || stridx(v:val, "Start") == 0')
-  if empty(hist)
-    echo "Cannot rerun, not in history"
+function! s:Rerun(...)
+  if a:0 == 0
     return
   endif
-  exe hist[-1]
+  let fargs = join(map(range(1, a:0),  "'a:' . v:val"), ", ")
+  let hist_cmd = eval(printf("s:HistFind(%s)", fargs))
+  if empty(hist_cmd)
+    echo "Cannot rerun, not in history"
+  else
+    exe hist_cmd
+  endif
 endfunction
 
 command! -nargs=0 Rerun call <SID>Rerun()
