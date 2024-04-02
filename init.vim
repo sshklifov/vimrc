@@ -116,7 +116,7 @@ set shiftwidth=2
 set tabstop=2
 set softtabstop=0
 set cinoptions=L0,l1,b0,g1,t0,(s,U1,N-s
-set cc=101
+autocmd FileType c,cpp setlocal cc=101
 
 cabbr Gd lefta Gdiffsplit
 cabbr Gl Gclog!
@@ -125,8 +125,8 @@ cabbr Gdt Git! difftool
 cabbr Gmt Git mergetool
 
 " Git commit style settings
-autocmd FileType gitcommit set spell
-autocmd FileType gitcommit set tw=90
+autocmd FileType gitcommit setlocal spell
+autocmd FileType gitcommit setlocal tw=90
 
 " Capture <Esc> in termal mode
 tnoremap <Esc> <C-\><C-n>
