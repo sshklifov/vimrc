@@ -107,8 +107,7 @@ cabbr Gdt Git! difftool
 cabbr Gmt Git mergetool
 
 " Git commit style settings
-autocmd FileType gitcommit setlocal spell
-autocmd FileType gitcommit setlocal tw=90
+autocmd FileType gitcommit setlocal spell | setlocal tw=90 | setlocal cc=91
 
 " Capture <Esc> in termal mode
 tnoremap <Esc> <C-\><C-n>
@@ -749,12 +748,12 @@ nnoremap <silent> [n :call <SID>Context(v:true)<CR>
 nnoremap <silent> ]n :call <SID>Context(v:false)<CR>
 "}}}
 
-""""""""""""""""""""""""""""DEBUGGING"""""""""""""""""""""""""""" {{{
+""""""""""""""""""""""""""""Debugging"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 command! -nargs=0 Capture exe "tab sb " . TermDebugCaptureNr()
 command! -nargs=0 Asm call TermDebugToggleAsm()
 command! -nargs=0 Gdb call TermDebugGoToGdb()
-command! -nargs=0 Up call TermDebugFindSource()
+command! -nargs=0 Up call TermDebugGoUp()
 
 function! s:StartDebug(exe)
   let exe = empty(a:exe) ? "a.out" : a:exe
@@ -853,8 +852,8 @@ function! s:DebugStartPost(args)
 
   nnoremap <silent> <leader>br :call TermDebugSendCommand("br " . <SID>GetDebugLoc())<CR>
   nnoremap <silent> <leader>tbr :call TermDebugSendCommand("tbr " . <SID>GetDebugLoc())<CR>
-  nnoremap <silent> <leader>unt :call TermDebugSendCommand(["tbr " . <SID>GetDebugLoc(), "c"])<CR>
-  nnoremap <silent> <leader>pc :call TermDebugGoToPC()<CR>
+  nnoremap <silent> <leader>unt :call TermDebugSendCommands("tbr " . <SID>GetDebugLoc(), "c")<CR>
+  nnoremap <silent> <leader>pc :call TermDebugGoToPc()<CR>
 
   call TermDebugSendCommand("set debug-file-directory /dev/null")
   call TermDebugSendCommand("set print asm-demangle on")
@@ -887,7 +886,9 @@ function! s:DebugRunPost(args)
   call TermDebugSendCommand("set scheduler-locking step")
 
   let cmds = get(a:args, "cmds", [])
-  call TermDebugSendCommand(cmds)
+  for cmd in cmds
+    call TermDebugSendCommand(cmd)
+  endfor
 endfunction
 
 function! s:DebugStopPre()
@@ -1126,8 +1127,8 @@ endfunction
 command! -nargs=0 Instances call <SID>Instances()
 "}}}
 
-""""""""""""""""""""""""""""REMOTE"""""""""""""""""""""""""""" {{{
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+""""""""""""""""""""""""""""Remote"""""""""""""""""""""""""""" {{{
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:RemoteStart(host, exe)
   let debug_args = #{ssh: a:host}
   if !empty(a:exe)
@@ -1174,23 +1175,6 @@ function! s:Sshfs(remote, args)
   silent exe "tabnew scp://" . a:remote . "/" . a:args
 endfunction
 
-function! SshfsCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-
-  let host = s:GetHostFromCommand('Sshfs', a:CmdLine)
-  if empty(a:ArgLead)
-    return systemlist(["ssh", host, "find / -maxdepth 1"])
-  else
-    let dirname = fnamemodify(a:ArgLead, ':h')
-    let remote_dirs = systemlist(["ssh", host, "find " . dirname . " -maxdepth 1 -type d"])
-    let remote_dirs = map(remote_dirs, 'v:val . "/"')
-    let remote_files = systemlist(["ssh", host, "find " . dirname . " -maxdepth 1 -type f"])
-    let total = remote_dirs + remote_files
-    return filter(total, 'stridx(v:val, a:ArgLead) == 0')
-  endif
-endfunction
 "}}}
 
 """"""""""""""""""""""""""""Context dependent"""""""""""""""""""""""""""" {{{
