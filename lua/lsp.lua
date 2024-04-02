@@ -51,7 +51,10 @@ end
 
 -- Auto completion
 
-function ShowAutoCompletion()
+function ShowAutoCompletion(...)
+  local vargs = ({...})[1]
+  local force_pum = vim.fn.pumvisible() ~= 0 or vargs ~= nil
+
   if not vim.fn.pumvisible() == 0 then
     return ClearAutoCompletion()
   end
@@ -61,7 +64,7 @@ function ShowAutoCompletion()
   local cursor_pos = pos[2]
   local line = api.nvim_get_current_line()
   local prefix = vim.fn.matchstr(string.sub(line, 1, cursor_pos), '\\k*$')
-  if string.len(prefix) == 0 then
+  if string.len(prefix) == 0 and not force_pum then
     return ClearAutoCompletion()
   end
 
@@ -87,7 +90,11 @@ function ShowAutoCompletion()
     end
 
     local end_of_line = (cursor_pos == string.len(line))
-    if end_of_line then
+    if force_pum then
+      -- Display whole completion in pop up menu
+      local insert_pos = cursor_pos + 1 - string.len(prefix)
+      vim.fn.complete(insert_pos, complete_items)
+    elseif end_of_line then
       -- Display inline
       local text = string.sub(new_text, string.len(old_text) + 1, -1)
       local line_pos = pos[1] - 1
@@ -95,7 +102,7 @@ function ShowAutoCompletion()
       local ns = api.nvim_create_namespace("autocomplete")
       api.nvim_buf_set_extmark(0, ns, line_pos, -1, opts)
     else
-      -- Display whole completion in pum
+      -- Display a single completion (what will be TAB completed) in pum
       local insert_pos = cursor_pos + 1 - string.len(prefix)
       vim.fn.complete(insert_pos, {complete_items[1]})
     end
@@ -130,12 +137,6 @@ function AcceptAutoCompletion()
   else
     return res
   end
-end
-
-function OmniCompletion()
-  ClearAutoCompletion()
-  -- Return <C-X><C-O>
-  return vim.fn.nr2char(24) .. vim.fn.nr2char(15)
 end
 
 -- Keymaps and registration
@@ -177,11 +178,8 @@ local OnCclsAttach = function(_, bufnr)
   autocmd('TextChangedI', function() ShowAutoCompletion() end)
   autocmd('InsertLeave', function() ClearAutoCompletion() end)
 
-  opts = {noremap=true, silent=true, expr=true}
-  buf_set_keymap('i', '<C-space>', 'luaeval("OmniCompletion()")', opts)
-  buf_set_keymap('i', '<Tab>', 'luaeval("AcceptAutoCompletion()")', opts)
-
-  buf_set_option('omnifunc', 'v:lua.vim.lsp.omnifunc')
+  buf_set_keymap('i', '<C-space>', '<cmd>lua ShowAutoCompletion({force_pum=true})<CR>', {noremap=true})
+  buf_set_keymap('i', '<Tab>', 'luaeval("AcceptAutoCompletion()")', {noremap=true, silent=true, expr=true})
 end
 
 lspconfig.clangd.setup {
