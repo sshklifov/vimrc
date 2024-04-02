@@ -43,21 +43,6 @@ let g:qsearch_exclude_dirs = [".cache", ".git", "Debug", "Release", "build"]
 let g:qsearch_exclude_files = ["compile_commands.json"]
 
 " tpope/vim-eunuch
-function! s:Move(arg)
-  if a:arg == ""
-    echo "Did not move file"
-    return
-  endif
-
-  let oldname = expand("%:p")
-  let newname = a:arg . "/" . expand("%:t")
-  
-  let lua_str = 'lua vim.lsp.util.rename("' . oldname . '", "' . newname . '")'
-  exe lua_str
-endfunction
-
-command! -nargs=1 -complete=dir Move call <SID>Move(<q-args>)
-
 function! s:Rename(arg)
   if a:arg == ""
     echo "Did not rename file"
