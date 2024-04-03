@@ -1212,15 +1212,7 @@ function s:ObsidianMake(...)
   return Make(command, bang)
 endfunction
 
-command! -nargs=? -bang -complete=customlist,MakeCompl Make call <SID>ObsidianMake(<q-args>, "<bang>")
-
-function! MakeCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  let items = ["Debug", "Release"]
-  return items->ArgFilter(a:ArgLead)
-endfunction
+command! -nargs=0 -bang Make call <SID>ObsidianMake("<bang>")
 
 function! s:ResolveEnvFile()
   let fname = expand("%:f")
