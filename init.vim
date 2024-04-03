@@ -754,6 +754,8 @@ command! -nargs=0 Capture exe "tab sb " . TermDebugCaptureNr()
 command! -nargs=0 Asm call TermDebugToggleAsm()
 command! -nargs=0 Gdb call TermDebugGoToGdb()
 command! -nargs=0 Up call TermDebugGoUp()
+command! -nargs=0 Backtrace call TermDebugBacktrace()
+command! -nargs=0 Threads call TermDebugThreadInfo()
 
 function! s:StartDebug(exe)
   let exe = empty(a:exe) ? "a.out" : a:exe
@@ -1471,7 +1473,7 @@ nnoremap <silent> <leader>re <cmd>Resync<CR>
 nnoremap <silent> <leader>rv <cmd>Video<CR>
 nnoremap <silent> <leader>rs <cmd>Rtsp<CR>
 nnoremap <silent> <leader>av <cmd>Attach video<CR>
-nnoremap <silent> <leader>ar <cmd>Attach rtsp<CR>
+nnoremap <silent> <leader>as <cmd>Attach rtsp<CR>
 
 """"""""""""""""""""""""""""TODO"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
