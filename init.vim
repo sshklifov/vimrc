@@ -829,6 +829,22 @@ endfunction
 " - ssh. Launch GDB over ssh with the given address.
 " - cmds. Additional commands to execute once the inferior is loaded
 function! s:Debug(args)
+  let required = ['exe', 'proc']
+  let optional = ['symbols', 'ssh', 'cmds']
+  let req_keys = filter(keys(a:args), "index(required, v:val) >= 0")
+  if len(req_keys) != 1
+    echo "Must pass exactly one of: " . string(required)
+    return
+  endif
+  let total = required + optional
+  let invalid_keys = filter(keys(a:args), "index(total, v:val) < 0")
+  if len(invalid_keys) > 0
+    echo "Unexpected arguments: " . string(invalid_keys)
+    return
+  endif
+
+  " if index(keys, required[0]) == 0 && index(keys
+
   if TermDebugIsOpen()
     echoerr 'Terminal debugger already running, cannot run two'
     return
@@ -1150,21 +1166,24 @@ function! s:RemoteRun(host, exe)
   call s:Debug(debug_args)
 endfunction
 
-function! s:RemoteAttach(host, proc)
+function! s:RemotePid(host, proc)
   let pid = systemlist(["ssh", "-o", "ConnectTimeout=1", a:host, "pgrep " . a:proc])
   if len(pid) > 1
     echo "Multiple instances of " . a:proc
-    return
+    return -1
   elseif len(pid) < 1
     echo "Cannot attach: " . a:proc . " is not running"
-    return
+    return -1
   endif
+  return pid[0]
+endfunction
 
-  let br_cmd = 'br ' . s:GetDebugLoc()
-  let spin_cmd = 'call spinoff()'
-  let run_cmd = 'c'
-  let opts = #{ssh: a:host, proc: pid[0], cmds: [br_cmd, spin_cmd, run_cmd]}
-  call s:Debug(opts)
+function! s:RemoteAttach(host, proc)
+  let pid = s:RemotePid(a:host, a:proc)
+  if pid > 0
+    let opts = #{ssh: a:host, proc: pid[0]}
+    call s:Debug(opts)
+  endif
 endfunction
 
 function! s:SshTerm(remote)
@@ -1215,6 +1234,8 @@ function s:ObsidianMake(...)
 endfunction
 
 command! -nargs=0 -bang Make call <SID>ObsidianMake("<bang>")
+
+command! -nargs=0 Clean call system("rm -rf " . FugitiveFind(s:build_type))
 
 function! s:ResolveEnvFile()
   let fname = expand("%:f")
@@ -1445,35 +1466,68 @@ endfunction
 
 command! -nargs=0 Kill call <SID>KillApplications()
 
-function! s:SetObsidianSpin(basename, state)
+function! s:CheckSpinning(main_file, ...)
   let origw = win_getid()
-  exe "split /home/stef/obsidian-video/application/src/" . a:basename
-  if search("spinoff();") <= 0
-    echo "Missing bootstrap code for spinning"
-    call win_gotoid(origw)
+  exe "split /home/stef/obsidian-video/application/src/" . a:main_file
+
+  if search("volatile int spin") <= 0
+    let lnum = search("int main")
+    call append(lnum, "volatile int spin = 0;")
+    call append(lnum + 1, "while (spin);")
+    throw "Bootstrapping spinning code..."
+  endif
+
+  let line = getline('.')
+  let state = (line =~ "1")
+  if a:0 > 0
+    let expected = a:1
+    if state != expected
+      let line = substitute(line, state, expected, '')
+      call setline('.', line)
+      write
+      Resync
+    endif
+  endif
+  quit
+  call win_gotoid(origw)
+  return state
+endfunction
+
+command! -nargs=0 -bang SpinVideo call s:CheckSpinning("obsidian_video.cc", <bang>1)
+command! -nargs=0 -bang SpinRtsp call s:CheckSpinning("rtsp_server.cc", <bang>1)
+
+function! s:AttachToSpinning(main_file)
+  if a:main_file =~ "video"
+    let pid = s:RemotePid(s:host, "video")
+  elseif a:main_file =! "rtsp"
+    let pid = s:RemotePid(s:host, "rtsp")
+  endif
+  if !exists('pid') || pid < 0
     return
   endif
 
-  let state = (getline('.') =~ "//")
-  if state != a:state
-    Commentary
-    write
-    Resync
-  else
-  quit
-  call win_gotoid(origw)
+  let is_spinning = s:CheckSpinning(a:main_file)
+  let opts = #{ssh: s:host, proc: pid}
+  if is_spinning
+    let cmds = ['set var spin = 0', 'c']
+    if &ft == 'cpp' || &ft == 'c'
+      let cmds = ['br ' . s:GetDebugLoc()] + cmds
+    endif
+    let opts['cmds'] = cmds
+  endif
+  call s:Debug(opts)
 endfunction
 
-command! -nargs=0 -bang SpinVideo call s:SetObsidianSpin("obsidian_video.cc", <bang>1)
-command! -nargs=0 -bang SpinRtsp call s:SetObsidianSpin("rtsp_server.cc", <bang>1)
+command -nargs=0 AttachVideo call s:AttachToSpinning("obsidian_video.cc")
+command -nargs=0 AttachRtsp call s:AttachToSpinning("rtsp_server.cc")
 "}}}
 
 nnoremap <silent> <leader>k <cmd>Kill<CR>
 nnoremap <silent> <leader>re <cmd>Resync<CR>
 nnoremap <silent> <leader>rv <cmd>Video<CR>
 nnoremap <silent> <leader>rs <cmd>Rtsp<CR>
-nnoremap <silent> <leader>av <cmd>Attach video<CR>
-nnoremap <silent> <leader>as <cmd>Attach rtsp<CR>
+nnoremap <silent> <leader>av <cmd>AttachVideo<CR>
+nnoremap <silent> <leader>as <cmd>AttachRtsp<CR>
 
 """"""""""""""""""""""""""""TODO"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
