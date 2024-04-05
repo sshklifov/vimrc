@@ -1357,12 +1357,15 @@ endfunction
 
 command! -nargs=0 Resync call s:Resync()
 
-function s:ChangeHost(host)
-  call system(["ssh", "-o", "ConnectTimeout=1", a:host, "exit"])
-  if v:shell_error != 0
-    echo "Failed to connect to host " . a:host
-    return
+function s:ChangeHost(host, check)
+  if a:check
+    call system(["ssh", "-o", "ConnectTimeout=1", a:host, "exit"])
+    if v:shell_error != 0
+      echo "Failed to connect to host " . a:host
+      return
+    endif
   endif
+
   let s:host = a:host
   exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start call <SID>RemoteStart('%s', <q-args>)", s:host)
   exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run call <SID>RemoteRun('%s', <q-args>)", s:host)
@@ -1370,7 +1373,7 @@ function s:ChangeHost(host)
   exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs call <SID>Sshfs('%s', <q-args>)", s:host)
 endfunction
 
-command! -nargs=1 -complete=customlist,ChangeHostCompl Host call s:ChangeHost(<q-args>)
+command! -nargs=1 -complete=customlist,ChangeHostCompl Host call s:ChangeHost(<q-args>, 1)
 
 function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -1379,7 +1382,7 @@ function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   return ['p10']
 endfunction
 
-call s:ChangeHost('p10')
+call s:ChangeHost('p10', 0)
 "}}}
 
 """"""""""""""""""""""""""""Applications"""""""""""""""""""""""""""" {{{
