@@ -622,8 +622,8 @@ command! -nargs=0 Uncomplete call <SID>UncompleteFiles()
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-function! s:GoToNextItem(dir)
-  if &diff
+function! s:NextItem(dir)
+  if s:DiffFugitiveWinid() >= 0
     if a:dir == "prev"
       exe "normal! [c"
     elseif a:dir == "next"
@@ -649,10 +649,22 @@ function! s:GoToNextItem(dir)
   endif
 endfunction
 
-nnoremap <silent> [c :call <SID>GoToNextItem("prev")<CR>
-nnoremap <silent> ]c :call <SID>GoToNextItem("next")<CR>
-nnoremap <silent> [C :call <SID>GoToNextItem("first")<CR>
-nnoremap <silent> ]C :call <SID>GoToNextItem("last")<CR>
+nnoremap <silent> [c :call <SID>NextItem("prev")<CR>
+nnoremap <silent> ]c :call <SID>NextItem("next")<CR>
+nnoremap <silent> [C :call <SID>NextItem("first")<CR>
+nnoremap <silent> ]C :call <SID>NextItem("last")<CR>
+
+function! s:ToggleQf()
+  if s:DiffFugitiveWinid() < 0
+    if IsQfOpen()
+      cclose
+    else
+      copen
+    endif
+  endif
+endfunction
+
+nnoremap <silent> <leader>cc :call <SID>ToggleQf()<CR>
 
 " Navigate blocks
 nnoremap [b [{
