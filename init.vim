@@ -1289,8 +1289,8 @@ function! SshfsCompl(ArgLead, CmdLine, CursorPos)
     return []
   endif
 
-  if empty(a:ArgLead)
-    return systemlist(["ssh", host, "find / -maxdepth 1"])
+  if empty(a:ArgLead) || a:ArgLead == '/'
+    return systemlist(["ssh", s:host, "find / -maxdepth 1"])
   else
     let dirname = fnamemodify(a:ArgLead, ':h')
     let remote_dirs = systemlist(["ssh", s:host, "find " . dirname . " -maxdepth 1 -type d"])
