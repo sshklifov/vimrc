@@ -369,12 +369,10 @@ function! s:ToggleDiff()
     endif
     let name = bufname(bufnr)
     let commitish = split(FugitiveParse(name)[0], ":")[0]
-    let realnr = bufnr(FugitiveReal(name))
     " Memorize the last diff commitish for the buffer
-    call win_gotoid(winid)
-    exe "b " . realnr
-    let b:commitish = commitish
+    call setbufvar(bufnr, 'commitish', commitish)
     " Close fugitive window
+    call win_gotoid(winid)
     quit
   elseif s:CanStartDiff()
     cclose
@@ -435,7 +433,7 @@ endfunction
 " CursorHold time
 set updatetime=500
 set completeopt=menuone,noinsert
-set pumheight=5
+set pumheight=10
 
 " http://vim.wikia.com/wiki/Automatically_append_closing_characters
 inoremap {<CR> {<CR>}<C-o>O
@@ -753,7 +751,8 @@ nnoremap <silent> ]n :call <SID>Context(v:false)<CR>
 command! -nargs=0 Capture exe "tab sb " . TermDebugCaptureNr()
 command! -nargs=0 Asm call TermDebugToggleAsm()
 command! -nargs=0 Gdb call TermDebugGoToGdb()
-command! -nargs=0 Up call TermDebugGoUp()
+command! -nargs=0 Up call TermDebugGoUp("/home/stef")
+command! -nargs=0 Pwd call TermDebugShowPwd()
 command! -nargs=0 Backtrace call TermDebugBacktrace()
 command! -nargs=0 Threads call TermDebugThreadInfo()
 
@@ -884,6 +883,7 @@ function! s:DebugStartPost(args)
   call TermDebugSendCommand("set print object on")
   call TermDebugSendCommand("set breakpoint pending on")
   call TermDebugSendCommand("set debuginfod enabled off")
+  call TermDebugSendCommand("set max-completions 20")
   if quick_load
     call TermDebugSendCommand("set auto-solib-add off")
   endif
@@ -1405,14 +1405,17 @@ function! s:RunObsidianVideo()
   let cmd = "sudo -u rock-video /tmp/obsidian-video"
   call add(cmds, cmd)
 
+  let was_win = win_getid()
   tabnew
+
   let id = termopen(["ssh", s:host])
   call cursor("$", 1)
   call add(cmds, "")
   call chansend(id, cmds)
-
   exe "file " . bufname
   call add(s:job_list, id)
+
+  call win_gotoid(was_win)
 endfunction
 
 command! -nargs=0 Video call <SID>RunObsidianVideo()
@@ -1441,19 +1444,25 @@ function! s:RunRtspServer()
   let cmd = "sudo -u rtsp-server /tmp/rtsp-server"
   call add(cmds, cmd)
 
+  let was_win = win_getid()
   tabnew
+
   let id = termopen(["ssh", s:host])
   call cursor("$", 1)
   call add(cmds, "")
   call chansend(id, cmds)
-
   call add(s:job_list, id)
   exe "file " . bufname
+
+  call win_gotoid(was_win)
 endfunction
 
 command! -nargs=0 Rtsp call <SID>RunRtspServer()
 
 function! s:KillApplications()
+  if TermDebugIsOpen()
+    call TermDebugQuit()
+  endif
   for id in s:job_list
     let chan_info = nvim_get_chan_info(id)
     call jobstop(id)
@@ -1471,6 +1480,9 @@ function! s:CheckSpinning(main_file, ...)
   exe "split /home/stef/obsidian-video/application/src/" . a:main_file
 
   if search("volatile int spin") <= 0
+    if a:0 == 0
+      return 0
+    endif
     let lnum = search("int main")
     call append(lnum, "volatile int spin = 0;")
     call append(lnum + 1, "while (spin);")
@@ -1499,7 +1511,7 @@ command! -nargs=0 -bang SpinRtsp call s:CheckSpinning("rtsp_server.cc", <bang>1)
 function! s:AttachToSpinning(main_file)
   if a:main_file =~ "video"
     let pid = s:RemotePid(s:host, "video")
-  elseif a:main_file =! "rtsp"
+  elseif a:main_file =~ "rtsp"
     let pid = s:RemotePid(s:host, "rtsp")
   endif
   if !exists('pid') || pid < 0
