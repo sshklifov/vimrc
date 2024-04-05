@@ -1357,21 +1357,13 @@ endfunction
 
 command! -nargs=0 Resync call s:Resync()
 
-if !exists('s:host_map')
-  const s:host_map = {
-        \ '14': 'root@10.1.20.14',
-        \ 'Miro': 'root@10.1.20.14',
-        \ '26': 'root@10.1.20.26',
-        \ 'BrokenRGB': 'root@10.1.20.26',
-        \ '28': 'root@10.1.20.28',
-        \ 'BrokenIR': 'root@10.1.20.28',
-        \ '43': 'root@10.1.20.43',
-        \ 'P10': 'root@10.1.20.43',
-        \ }
-endif
-
-function s:ChangeHost(key)
-  let s:host = s:host_map[a:key]
+function s:ChangeHost(host)
+  call system(["ssh", "-o", "ConnectTimeout=1", a:host, "exit"])
+  if v:shell_error != 0
+    echo "Failed to connect to host " . a:host
+    return
+  endif
+  let s:host = a:host
   exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start call <SID>RemoteStart('%s', <q-args>)", s:host)
   exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run call <SID>RemoteRun('%s', <q-args>)", s:host)
   exe printf("command! -nargs=1 Attach call <SID>RemoteAttach('%s', <q-args>)", s:host)
@@ -1384,10 +1376,10 @@ function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return keys(s:host_map)
+  return ['p10']
 endfunction
 
-call s:ChangeHost('P10')
+call s:ChangeHost('p10')
 "}}}
 
 """"""""""""""""""""""""""""Applications"""""""""""""""""""""""""""" {{{
