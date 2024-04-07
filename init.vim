@@ -315,6 +315,31 @@ xnoremap <silent> <leader>P :<C-W>set
 
 command! -nargs=0 -bar Retab set invexpandtab | retab!
 
+function! s:GetWindows(pat, idx)
+  let windows = flatten(map(gettabinfo(), "v:val.windows"))
+  let win_names = map(windows, '[v:val, expand("#" . winbufnr(v:val) . ":t")]')
+  let win_names = filter(win_names, 'stridx(v:val[1], a:pat) >= 0 && !empty(v:val[1])')
+  return map(win_names, 'v:val[a:idx]')
+endfunction
+
+function! s:Window(pat)
+  let w = s:GetWindows(a:pat, 0)
+  if len(w) < 1
+    echo "No windows"
+  else
+    call win_gotoid(w[0])
+  endif
+endfunction
+
+command! -nargs=1 -complete=customlist,WindowCompl Window call s:Window(<q-args>)
+
+function! WindowCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  return s:GetWindows(a:ArgLead, 1)
+endfunction
+
 function! s:DiffFugitiveWinid()
   " Load all windows in tab
   let winids = gettabinfo(tabpagenr())[0]["windows"]
