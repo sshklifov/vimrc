@@ -760,14 +760,6 @@ nnoremap <silent> ]n :call <SID>Context(v:false)<CR>
 
 """"""""""""""""""""""""""""Debugging"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-command! -nargs=0 Capture exe "tab sb " . TermDebugCaptureNr()
-command! -nargs=0 Asm call TermDebugToggleAsm()
-command! -nargs=0 Gdb call TermDebugGoToGdb()
-command! -nargs=0 Up call TermDebugGoUp("/home/stef")
-command! -nargs=0 Pwd call TermDebugShowPwd()
-command! -nargs=0 Backtrace call TermDebugBacktrace()
-command! -nargs=0 Threads call TermDebugThreadInfo()
-
 function! s:StartDebug(exe)
   let exe = empty(a:exe) ? "a.out" : a:exe
   let opts = {"exe": exe}
@@ -791,7 +783,6 @@ function! ExeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-
   " Can't use Find() since it ignores the build folder
   let pat = "*" . a:ArgLead . "*"
   let cmd = ["find", ".", "(", "-path", "**/.git", "-prune", "-false", "-o", "-name", pat, ")"]
@@ -863,7 +854,6 @@ function! s:Debug(args)
 
   " Install new autocmds
   autocmd! User TermDebugStopPre call s:DebugStopPre()
-  exe "autocmd! User TermDebugStartPost call s:DebugStartPost(" . string(a:args) . ")"
   exe "autocmd! User TermDebugRunPost call s:DebugRunPost(" . string(a:args) . ")"
 
   if has_key(a:args, "ssh")
@@ -871,13 +861,22 @@ function! s:Debug(args)
   else
     call TermDebugStart()
   endif
+  call s:DebugStartPost(a:args)
 endfunction
 
 function! s:DebugStartPost(args)
   let quick_load = has_key(a:args, "symbols") && !a:args["symbols"]
 
-  nnoremap <silent> <leader>v :call TermDebugEvaluate(expand('<cword>'))<CR>
-  vnoremap <silent> <leader>v :call TermDebugEvaluate(<SID>GetRangeExpr())<CR>
+  command! -nargs=0 Capture call TermDebugGoToCapture()
+  command! -nargs=0 Asm call TermDebugToggleAsm()
+  command! -nargs=0 Gdb call TermDebugGoToGdb()
+  command! -nargs=0 Up call TermDebugGoUp("/home/stef")
+  command! -nargs=0 Pwd call TermDebugShowPwd()
+  command! -nargs=0 Backtrace call TermDebugBacktrace()
+  command! -nargs=0 Threads call TermDebugThreadInfo()
+
+  nnoremap <silent> <leader>v <cmd>call TermDebugEvaluate(expand('<cword>'))<CR>
+  vnoremap <silent> <leader>v :<C-u>call TermDebugEvaluate(<SID>GetRangeExpr())<CR>
 
   nnoremap <silent> <leader>br :call TermDebugSendCommand("br " . <SID>GetDebugLoc())<CR>
   nnoremap <silent> <leader>tbr :call TermDebugSendCommand("tbr " . <SID>GetDebugLoc())<CR>
@@ -914,7 +913,6 @@ endfunction
 
 function! s:DebugRunPost(args)
   call TermDebugSendCommand("set scheduler-locking step")
-
   let cmds = get(a:args, "cmds", [])
   for cmd in cmds
     call TermDebugSendCommand(cmd)
@@ -928,6 +926,14 @@ function! s:DebugStopPre()
   silent! nunmap <leader>tbr
   silent! nunmap <leader>unt
   silent! nunmap <leader>pc
+
+  silent! delcommand Capture
+  silent! delcommand Asm
+  silent! delcommand Gdb
+  silent! delcommand Up
+  silent! delcommand Pwd
+  silent! delcommand Backtrace
+  silent! delcommand Threads
 endfunction
 
 function! s:GetDebugLoc()
@@ -1261,7 +1267,6 @@ function! s:ResolveEnvFile()
   endif
 
   if filereadable(resolved)
-    let pos = getcurpos()[1:]
     let view = winsaveview()
     exe "edit " . resolved
     call winrestview(view)
