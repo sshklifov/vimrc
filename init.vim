@@ -386,6 +386,29 @@ endfunction
 
 nnoremap <silent> <leader>dif :call <SID>ToggleDiff()<CR>
 
+function! s:Operator(cmd, pending)
+  let &operatorfunc = function('s:DoOperatorCmd', [a:cmd])
+  if a:pending
+    return 'g@'
+  else
+    return 'g@_'
+  endif
+endfunction
+
+function! s:DoOperatorCmd(cmd, type)
+  if a:type != "line"
+    return
+  endif
+  let firstline = line("'[")
+  let lastline = line("']")
+  exe printf("%d,%d%s", firstline, lastline, a:cmd)
+endfunction
+
+nnoremap <expr> <leader>dp <SID>Operator("diffput", 1)
+nnoremap <expr> <leader>dpp <SID>:Operator("diffput", 0)
+nnoremap <expr> <leader>do <SID>:Operator("diffget", 1)
+nnoremap <expr> <leader>doo <SID>:Operator("diffget", 0)
+
 function! s:GetUnstaged()
   let dict = FugitiveExecute(["ls-files", "--exclude-standard", "--modified"])
   if dict['exit_status'] != 0
