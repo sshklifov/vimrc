@@ -964,7 +964,8 @@ function! s:DebugStartPost(args)
   command! -nargs=0 Up call TermDebugGoUp("/home/stef")
   command! -nargs=0 Pwd call TermDebugShowPwd()
   command! -nargs=0 Backtrace call TermDebugBacktrace()
-  command! -nargs=0 Threads call TermDebugThreadInfo()
+  command! -nargs=? Threads call TermDebugThreadInfo(<q-args>)
+  command! -nargs=0 DebugSym call TermDebugFindSym(expand('<cword>'))
 
   nnoremap <silent> <leader>v <cmd>call TermDebugEvaluate(expand('<cword>'))<CR>
   vnoremap <silent> <leader>v :<C-u>call TermDebugEvaluate(<SID>GetRangeExpr())<CR>
@@ -972,7 +973,7 @@ function! s:DebugStartPost(args)
   nnoremap <silent> <leader>br :call TermDebugSendCommand("br " . <SID>GetDebugLoc())<CR>
   nnoremap <silent> <leader>tbr :call TermDebugSendCommand("tbr " . <SID>GetDebugLoc())<CR>
   nnoremap <silent> <leader>unt :call TermDebugSendCommands("tbr " . <SID>GetDebugLoc(), "c")<CR>
-  nnoremap <silent> <leader>pc :call TermDebugGoToPc()<CR>
+  nnoremap <silent> <leader>pc :call TermDebugGoToPC()<CR>
 
   call TermDebugSendCommand("set debug-file-directory /dev/null")
   call TermDebugSendCommand("set print asm-demangle on")
@@ -1584,6 +1585,8 @@ function! s:CheckSpinning(main_file, ...)
 
   if search("volatile int spin") <= 0
     if a:0 == 0
+      quit
+      call win_gotoid(origw)
       return 0
     endif
     let lnum = search("int main")
