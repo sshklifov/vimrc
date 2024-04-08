@@ -626,13 +626,14 @@ endfunction
 
 command! -nargs=? -bang -complete=customlist,OriginCompl Review call <SID>Review("<bang>", <q-args>)
 
-" ok?
-nnoremap <silent> <leader>ok :Complete<CR>
-
 function! s:ReviewCompleteFiles(cmd_bang, arg) abort
   if !exists("g:review_stack")
     echo "Start a review first"
     return
+  endif
+  " Close diff
+  if s:DiffFugitiveWinid() >= 0
+    call s:ToggleDiff()
   endif
 
   let new_items = copy(g:review_stack[-1])
@@ -652,10 +653,7 @@ function! s:ReviewCompleteFiles(cmd_bang, arg) abort
     echo "Review completed!"
   else
     call DisplayInQf(new_items, "Review")
-  endif
-  " Close diff
-  if s:DiffFugitiveWinid() >= 0
-    call s:ToggleDiff()
+    cc
   endif
 endfunction
 
@@ -671,6 +669,32 @@ endfunction
 
 command! -bang -nargs=? -complete=customlist,CompleteCompl Complete  call <SID>ReviewCompleteFiles('<bang>', <q-args>)
 
+function! s:ReviewPostponeFile()
+  if !exists("g:review_stack")
+    echo "Start a review first"
+    return
+  endif
+  let list = g:review_stack[-1]
+  let nrs = map(copy(list), "v:val.bufnr")
+  let idx = index(nrs, bufnr())
+  if idx < 0
+    return
+  endif
+  let item = remove(list, idx)
+  call add(list, item)
+
+  " Close diff
+  if s:DiffFugitiveWinid() >= 0
+    call s:ToggleDiff()
+  endif
+  " Refresh quickfix
+  call DisplayInQf(list, "Review")
+  cc
+endfunction
+
+nnoremap <silent> <leader>ok <cmd>Complete<CR>
+nnoremap <silent> <leader>nok <cmd>call <SID>ReviewPostponeFile()<CR>
+
 function! s:UncompleteFiles()
   if !exists("g:review_stack")
     echo "Start a review first"
@@ -680,7 +704,7 @@ function! s:UncompleteFiles()
     call remove(g:review_stack, -1)
     let items = g:review_stack[-1]
     call DisplayInQf(items, "Review")
-  end
+  endif
 endfunction
 
 command! -nargs=0 Uncomplete call <SID>UncompleteFiles()
@@ -1562,8 +1586,8 @@ function! s:CheckSpinning(main_file, ...)
       return 0
     endif
     let lnum = search("int main")
-    call append(lnum, "volatile int spin = 0;")
-    call append(lnum + 1, "while (spin);")
+    call append(lnum, "  volatile int spin = 0;")
+    call append(lnum + 1, "  while (spin);")
     throw "Bootstrapping spinning code..."
   endif
 
