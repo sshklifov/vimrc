@@ -384,6 +384,9 @@ function! s:CanStartDiff()
   return !empty(FugitiveGitDir(bufnr))
 endfunction
 
+" Mostly remove search from foldopen
+set foldopen=block,hor,jump,mark,quickfix,undo
+
 function! s:ToggleDiff()
   let winid = s:DiffFugitiveWinid()
   if winid >= 0
@@ -429,10 +432,25 @@ function! s:DoOperatorCmd(cmd, type)
   exe printf("%d,%d%s", firstline, lastline, a:cmd)
 endfunction
 
-nnoremap <expr> <leader>dp <SID>Operator("diffput", 1)
-nnoremap <expr> <leader>dpp <SID>:Operator("diffput", 0)
-nnoremap <expr> <leader>do <SID>:Operator("diffget", 1)
-nnoremap <expr> <leader>doo <SID>:Operator("diffget", 0)
+xnoremap <expr> dp <SID>Operator("diffput", 1)
+nnoremap <expr> dp <SID>Operator("diffput", 1)
+nnoremap <expr> dP <SID>Operator("diffput", 0)
+
+xnoremap <expr> do <SID>Operator("diffget", 1)
+nnoremap <expr> do <SID>Operator("diffget", 1)
+nnoremap <expr> dO <SID>Operator("diffget", 0)
+
+" Undoing diffs
+nnoremap dpu <C-w>wu<C-w>w
+nnoremap dou u
+
+" Saving diffs
+nnoremap dpw <C-w>w:w<CR><C-w>w
+nnoremap dow w
+
+" Good ol' regular diff commands
+nnoremap dpp dp
+nnoremap doo do
 
 function! s:GetUnstaged()
   let dict = FugitiveExecute(["ls-files", "--exclude-standard", "--modified"])
