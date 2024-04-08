@@ -651,6 +651,7 @@ function! s:ReviewCompleteFiles(cmd_bang, arg) abort
   call add(g:review_stack, new_items)
   if empty(new_items)
     echo "Review completed!"
+    unlet g:review_stack
   else
     call DisplayInQf(new_items, "Review")
     cc
