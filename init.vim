@@ -19,6 +19,10 @@ Plug 'sshklifov/qutil'
 
 call plug#end()
 
+if !isdirectory(printf("/home/%s/.local/share/nvim/plugged", $USER))
+  finish
+endif
+
 " Redefine the group, avoids having the same autocommands twice
 augroup vimrc
 au!
