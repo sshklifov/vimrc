@@ -128,6 +128,7 @@ function GetAutoCompletion()
 end
 
 function AcceptAutoCompletion()
+  -- TODO just apply the text edit dummy!
   local res = GetAutoCompletion()
   ClearAutoCompletion()
 
@@ -254,3 +255,21 @@ lspconfig.lua_ls.setup {
     Lua = {}
   },
 }
+
+-- System clipboard
+
+local function copy(lines, _)
+  require('osc52').copy(table.concat(lines, '\n'))
+end
+
+local function paste()
+  return {vim.fn.split(vim.fn.getreg(''), '\n'), vim.fn.getregtype('')}
+end
+
+if vim.fn.eval("$SSH_TTY") ~= "" then
+  vim.g.clipboard = {
+    name = 'osc52',
+    copy = {['+'] = copy, ['*'] = copy},
+    paste = {['+'] = paste, ['*'] = paste},
+  }
+end

@@ -12,6 +12,7 @@ Plug 'catppuccin/nvim', { 'as': 'catppuccin' }
 
 Plug 'tpope/vim-fugitive'
 Plug 'neovim/nvim-lspconfig'
+Plug 'ojroques/nvim-osc52'
 
 Plug 'sshklifov/debug'
 Plug 'sshklifov/qsearch'
