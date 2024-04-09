@@ -24,9 +24,9 @@ if !isdirectory(printf("/home/%s/.local/share/nvim/plugged", $USER))
 endif
 
 " Redefine the group, avoids having the same autocommands twice
-augroup vimrc
+augroup VimStartup
 au!
-autocmd BufWritePost init.vim source ~/.config/nvim/init.vim
+autocmd BufWritePost /home/$USER/.config/nvim/init.vim source ~/.config/nvim/init.vim
 
 """"""""""""""""""""""""""""Plugin settings"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -41,6 +41,7 @@ let tabulousCloseStr = ''
 " Netrw
 let g:netrw_hide = 1
 let g:netrw_banner = 0
+let g:netrw_keepdir = 0
 
 " sshklifov/qsearch
 let g:qsearch_exclude_dirs = [".cache", ".git", "Debug", "Release", "build"]
