@@ -732,6 +732,42 @@ function! s:UncompleteFiles()
 endfunction
 
 command! -nargs=0 Uncomplete call <SID>UncompleteFiles()
+
+func s:OpenStackTrace()
+  let dirs = GetRepos()
+
+  let lines = join(getline(1, '$'), "\n")
+  let lines = split(lines, '\(^#\)\|\(\n#\)')
+  let list = []
+  for line in lines
+    let m = matchlist(line, '^\([0-9]\+\).* at \([^:]\+\):\([0-9]\+\)')
+    if len(m) < 4
+      call add(list, #{text: '#'.line, valid: 0})
+    else
+      let level = m[1]
+      let file = m[2]
+      let line = m[3]
+      let resolved = v:false
+      for dir in dirs
+        let repo = fnamemodify(dir, ":t")
+        let resolved = substitute(file, "^.*" . repo, dir, "")
+        if filereadable(resolved)
+          call add(list, #{filename: resolved, lnum: line, text: level})
+          let resolved = v:true
+          break
+        endif
+      endfor
+      if !resolved
+        let text = printf("%s:%d", file, line)
+        call add(list, #{text: text, valid: 0})
+      endif
+    endif
+  endfor
+  call setqflist([], ' ', #{title: 'Stack', items: list})
+  copen
+endfunc
+
+command! -nargs=0 Crashtrace call s:OpenStackTrace()
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
@@ -1666,7 +1702,6 @@ endfunction
 
 command -nargs=0 AttachVideo call s:AttachToSpinning("obsidian_video.cc")
 command -nargs=0 AttachRtsp call s:AttachToSpinning("rtsp_server.cc")
-"}}}
 
 nnoremap <silent> <leader>k <cmd>Kill<CR>
 nnoremap <silent> <leader>re <cmd>Resync<CR>
@@ -1674,43 +1709,10 @@ nnoremap <silent> <leader>rv <cmd>Video<CR>
 nnoremap <silent> <leader>rs <cmd>Rtsp<CR>
 nnoremap <silent> <leader>av <cmd>AttachVideo<CR>
 nnoremap <silent> <leader>as <cmd>AttachRtsp<CR>
+"}}}
 
-func OpenStackTrace()
-  let dirs = ["/home/stef/obsidian-video", "/home/stef/camera_engine_rkaiq"]
-
-  let lines = join(getline(1, '$'), "\n")
-  let lines = split(lines, '\(^#\)\|\(\n#\)')
-  let list = []
-  for line in lines
-    let m = matchlist(line, '^\([0-9]\+\).* at \([^:]\+\):\([0-9]\+\)')
-    if len(m) < 4
-      call add(list, #{text: line, valid: 0})
-    else
-      let level = m[1]
-      let file = m[2]
-      let line = m[3]
-      let resolved = v:false
-      for dir in dirs
-        let repo = fnamemodify(dir, ":t")
-        let resolved = substitute(file, "^.*" . repo, dir, "")
-        if filereadable(resolved)
-          call add(list, #{filename: resolved, lnum: line, text: level})
-          let resolved = v:true
-          break
-        endif
-      endfor
-      if !resolved
-        let text = printf("%s:%d", file, line)
-        call add(list, #{text: text, valid: 0})
-      endif
-    endif
-  endfor
-  call setqflist([], ' ', #{title: 'Stack', items: list})
-  copen
-endfunc
-
-""""""""""""""""""""""""""""TODO"""""""""""""""""""""""""""" {{{
-""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+""""""""""""""""""""""""""""Testing"""""""""""""""""""""""""""" {{{
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! DecodeH264Packet()
   call system(["ssh", "p10", "/var/tmp/Debug/test/mpi_dec_test -i /tmp/packet.h264 -o /tmp/packet.nv12 -w 1920 -h 1072 -f 0"])
   if v:shell_error
