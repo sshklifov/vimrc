@@ -436,25 +436,44 @@ function! s:DoOperatorCmd(cmd, type)
   exe printf("%d,%d%s", firstline, lastline, a:cmd)
 endfunction
 
-xnoremap <expr> dp <SID>Operator("diffput", 1)
-nnoremap <expr> dp <SID>Operator("diffput", 1)
-nnoremap <expr> dP <SID>Operator("diffput", 0)
+function! s:DiffOtherExecute(cmd)
+  let winids = gettabinfo(tabpagenr())[0]['windows']
+  if winids[0] != win_getid()
+    call win_gotoid(winids[0])
+    exe a:cmd
+    call win_gotoid(winids[1])
+  else
+    call win_gotoid(winids[1])
+    exe a:cmd
+    call win_gotoid(winids[0])
+  endif
+endfunction
 
-xnoremap <expr> do <SID>Operator("diffget", 1)
-nnoremap <expr> do <SID>Operator("diffget", 1)
-nnoremap <expr> dO <SID>Operator("diffget", 0)
+function! s:ToggleDiffMaps()
+  " echoerr v:option_command
+  if v:option_new
+    " Diff put
+    nnoremap <expr> dp <SID>Operator("diffput", 1)
+    nnoremap <expr> dP <SID>Operator("diffput", 0)
+    " Diff get
+    nnoremap <expr> do <SID>Operator("diffget", 1)
+    nnoremap <expr> dO <SID>Operator("diffget", 0)
+    " Undoing diffs
+    nnoremap dpu <cmd>call <SID>DiffOtherExecute("undo")<CR>
+    " Saving diffs
+    nnoremap dpw <cmd>call <SID>DiffOtherExecute("write")<CR>
+    " Good ol' regular diff commands
+    nnoremap dpp dp
+    nnoremap doo do
+  else
+    let list = ["dp", "dP", "do", "dO", "dpu", "dpw", "dpp", "dpp"]
+    for bind in list
+      silent! "nunmap " . bind
+    endfor
+  endif
+endfunction
 
-" Undoing diffs
-nnoremap dpu <C-w>wu<C-w>w
-nnoremap dou u
-
-" Saving diffs
-nnoremap dpw <C-w>w:w<CR><C-w>w
-nnoremap dow w
-
-" Good ol' regular diff commands
-nnoremap dpp dp
-nnoremap doo do
+autocmd! OptionSet diff call s:ToggleDiffMaps()
 
 function! s:GetUnstaged()
   let dict = FugitiveExecute(["ls-files", "--exclude-standard", "--modified"])
@@ -940,8 +959,6 @@ function! s:Debug(args)
     return
   endif
 
-  " if index(keys, required[0]) == 0 && index(keys
-
   if TermDebugIsOpen()
     echoerr 'Terminal debugger already running, cannot run two'
     return
@@ -989,7 +1006,7 @@ function! s:DebugStartPost(args)
   call TermDebugSendCommand("set print thread-events off")
   call TermDebugSendCommand("set print object on")
   call TermDebugSendCommand("set breakpoint pending on")
-  call TermDebugSendCommand("set debuginfod enabled off")
+  " call TermDebugSendCommand("set debuginfod enabled off")
   call TermDebugSendCommand("set max-completions 20")
   if quick_load
     call TermDebugSendCommand("set auto-solib-add off")
@@ -1320,7 +1337,7 @@ let s:build_type = "Debug"
 
 function s:ObsidianMake(...)
   let repo = split(FugitiveWorkTree(), "/")[-1]
-  let obsidian_repos = ["obsidian-video", "libalcatraz", "mpp"]
+  let obsidian_repos = ["obsidian-video", "libalcatraz", "mpp", "camera_engine_rkaiq"]
   if index(obsidian_repos, repo) < 0
     echo "Unsupported repo: " . repo
     return
@@ -1337,8 +1354,15 @@ function s:ObsidianMake(...)
   let dir = printf("cd %s", FugitiveWorkTree())
   let env = printf("source %s/environment-setup-armv8a-aisys-linux", sdk)
 
-  let cmake = printf("cmake -B %s -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=%s", s:build_type, s:build_type)
-  let build = printf("cmake --build %s", s:build_type)
+  if repo == 'camera_engine_rkaiq'
+    let cmake = "cmake -S. -B" . s:build_type
+    let cmake .= " -DIQ_PARSER_V2_EXTRA_CFLAGS='-I/opt/aisys/obsidian_10/sysroots/armv8a-aisys-linux/usr/include/rockchip-uapi;"
+    let cmake .= "-I/opt/aisys/obsidian_10/sysroots/armv8a-aisys-linux/usr/include'"
+    let cmake .= " -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DISP_HW_VERSION='-DISP_HW_V30' -DARCH='aarch64' -DRKAIQ_TARGET_SOC='rk3588'"
+  else
+    let cmake = printf("cmake -B %s -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=%s", s:build_type, s:build_type)
+  endif
+  let build = printf("cmake --build %s -j 10", s:build_type)
 
   let cmds = [dir, env, cxxflags, cflags, cmake, build]
   let command = ["/bin/bash", "-c", join(cmds, ';')]
@@ -1650,6 +1674,40 @@ nnoremap <silent> <leader>rv <cmd>Video<CR>
 nnoremap <silent> <leader>rs <cmd>Rtsp<CR>
 nnoremap <silent> <leader>av <cmd>AttachVideo<CR>
 nnoremap <silent> <leader>as <cmd>AttachRtsp<CR>
+
+func OpenStackTrace()
+  let dirs = ["/home/stef/obsidian-video", "/home/stef/camera_engine_rkaiq"]
+
+  let lines = join(getline(1, '$'), "\n")
+  let lines = split(lines, '\(^#\)\|\(\n#\)')
+  let list = []
+  for line in lines
+    let m = matchlist(line, '^\([0-9]\+\).* at \([^:]\+\):\([0-9]\+\)')
+    if len(m) < 4
+      call add(list, #{text: line, valid: 0})
+    else
+      let level = m[1]
+      let file = m[2]
+      let line = m[3]
+      let resolved = v:false
+      for dir in dirs
+        let repo = fnamemodify(dir, ":t")
+        let resolved = substitute(file, "^.*" . repo, dir, "")
+        if filereadable(resolved)
+          call add(list, #{filename: resolved, lnum: line, text: level})
+          let resolved = v:true
+          break
+        endif
+      endfor
+      if !resolved
+        let text = printf("%s:%d", file, line)
+        call add(list, #{text: text, valid: 0})
+      endif
+    endif
+  endfor
+  call setqflist([], ' ', #{title: 'Stack', items: list})
+  copen
+endfunc
 
 """"""""""""""""""""""""""""TODO"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
