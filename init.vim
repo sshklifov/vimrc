@@ -295,8 +295,8 @@ nnoremap <leader><leader>q :mksession! ~/.local/share/nvim/session.vim<CR>
 nnoremap <leader>so :so ~/.local/share/nvim/session.vim<CR>
 set sessionoptions=buffers,curdir,help,tabpages,winsize
 
-nnoremap <silent> <leader>cd :lcd %:p:h<CR>
-nnoremap <silent> <leader>gcd :Gcd<CR>
+nnoremap <silent> cd :lcd %:p:h<CR>
+nnoremap <silent> gcd :Gcd<CR>
 
 nnoremap <silent> <leader>ta :tabnew<CR><C-O>
 nnoremap <silent> <leader>tA :-tabnew<CR><C-O>
@@ -901,6 +901,7 @@ function! s:EditFugitive()
 endfunction
 
 nnoremap <silent> <leader>fug :call <SID>EditFugitive()<CR>
+nnoremap <silent> <leader>com <cmd> exe "Gedit " .. split(FugitiveParse()[0], ":")[0]<CR>
 
 function! s:Context(reverse)
   call search('^\(@@ .* @@\|[<=>|]\{7}[<=>|]\@!\)', a:reverse ? 'bW' : 'W')
@@ -1228,7 +1229,7 @@ function! WorkFilesCompl(ArgLead, CmdLine, CursorPos)
   return s:GetWorkFiles()->SplitItems(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->ArgFilter(<q-args>)->DisplayInQf('Workfiles')
+command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->ArgFilter(<q-args>)->DropInQf('Workfiles')
 
 function! TypeHierarchyHandler(res, encoding)
   let items = []
@@ -1656,7 +1657,7 @@ function! s:CheckSpinning(main_file, ...)
       return 0
     endif
     let lnum = search("int main")
-    call append(lnum, "  volatile int spin = 0;")
+    call append(lnum, printf("  volatile int spin = %d;", a:0))
     call append(lnum + 1, "  while (spin);")
     throw "Bootstrapping spinning code..."
   endif
