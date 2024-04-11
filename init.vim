@@ -82,7 +82,7 @@ endfunction
 command! -nargs=0 -bang Delete call <SID>Delete('<bang>')
 
 " tpope/vim-commentary
-autocmd BufEnter,BufNew *.fish setlocal commentstring=#\ %s
+autocmd BufEnter *.fish setlocal commentstring=#\ %s
 autocmd FileType vim setlocal commentstring=\"\ %s
 autocmd FileType cpp setlocal commentstring=\/\/\ %s
 
@@ -1026,6 +1026,8 @@ function! s:DebugStartPost(args)
   command! -nargs=0 Backtrace call TermDebugBacktrace()
   command! -nargs=? Threads call TermDebugThreadInfo(<q-args>)
   command! -nargs=0 DebugSym call TermDebugFindSym(expand('<cword>'))
+  command! -nargs=? Break call TermDebugGoToBreakpoint(<q-args>)
+  command! -nargs=? Commands call TermDebugEditCommands(<f-args>)
 
   nnoremap <silent> <leader>v <cmd>call TermDebugEvaluate(expand('<cword>'))<CR>
   vnoremap <silent> <leader>v :<C-u>call TermDebugEvaluate(<SID>GetRangeExpr())<CR>
@@ -1086,6 +1088,8 @@ function! s:DebugStopPre()
   silent! delcommand Pwd
   silent! delcommand Backtrace
   silent! delcommand Threads
+  silent! delcommand Break
+  silent! delcommand Commands
 endfunction
 
 function! s:GetDebugLoc()
