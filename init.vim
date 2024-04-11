@@ -585,71 +585,94 @@ function! OriginCompl(ArgLead, CmdLine, CursorPos)
   return s:GetRefs(['refs/remotes/origin'], a:ArgLead)
 endfunction
 
-function! s:Review(bang, arg)
+function! s:MasterOrThrow()
+  let branches = s:GetRefs(['refs/remotes'], 'ma')
+  if index(branches, 'origin/master') >= 0
+    return 'origin/master'
+  elseif index(branches, 'origin/main') >= 0
+    return 'origin/main'
+  else
+    throw "Failed to determine mainline."
+  endif
+endfunction
+
+function! s:HeadOrThrow()
+  let dict = FugitiveExecute(["rev-parse", "HEAD"])
+  if dict['exit_status'] != 0
+    throw "Failed to parse HEAD"
+  endif
+  return dict['stdout'][0]
+endfunction
+
+
+function! s:CommonParentOrThrow(branch, main)
+  let range = printf("%s..%s", a:main, a:branch)
+  let dict = FugitiveExecute(["log", range, "--pretty=format:%H"])
+  if dict['exit_status'] != 0
+    throw "Revision range failed"
+  endif
+  let branch_first = dict['stdout'][-1]
+  " Go 1 back to find the common commit
+  let dict = FugitiveExecute(["rev-parse", branch_first . "~1"])
+  if dict['exit_status'] != 0
+    throw "Failed to go back 1 commit from " . branch_first
+  endif
+  let common = dict['stdout'][0]
+  return common
+endfunction
+
+function! s:RefExistsOrThrow(commit)
+  if FugitiveExecute(["show", a:commit])['exit_status'] != 0
+    throw "Unknown ref to git: " . a:commit
+  endif
+endfunction
+
+function! s:InsideGitOrThrow()
+  if FugitiveExecute(["status"])['exit_status'] != 0
+    throw "Not inside repo"
+  endif
+endfunction
+
+function! s:TryReview(bang, arg)
+  " Refresh current state of review
   if exists("g:review_stack")
     let items = g:review_stack[-1]
     call DisplayInQf(items, "Review")
     return
   endif
 
-  " Run a test command
-  if FugitiveExecute(["status"])['exit_status'] != 0
-    echo "Not inside repo"
-    return
-  endif
-  " Auto detect mainline if not passed. Either 'master' or 'main'
-  let main = a:arg
-  if empty(main)
-    let branches = s:GetRefs(['refs/remotes'], 'ma')
-    if index(branches, 'origin/master') >= 0
-      let main = 'origin/master'
-    elseif index(branches, 'origin/main') >= 0
-      let main = 'origin/main'
-    else
-      echo "Failed to determine mainline. Pass it as argument"
-      return
-    endif
-  endif
-  " See if mainline exists
-  if FugitiveExecute(["show", main])['exit_status'] != 0
-    echo "Unknown ref to git: " . main
-    return
-  endif
-
+  call s:InsideGitOrThrow()
+  " Determine main branch
+  let head = s:HeadOrThrow()
   if a:bang == "!"
-    " Force the branchpoint to be at the mainline. This is necessary when the below commands fail
-    let bpoint = main
+    let bpoint = empty(a:arg) ? head : a:arg
+    call s:RefExistsOrThrow(bpoint)
   else
-    let range = main . "..HEAD"
-    let dict = FugitiveExecute(["log", range, "--pretty=format:%H"])
-    if dict['exit_status'] != 0
-      echo "Revision range failed, aborting review"
-      return
-    endif
-    let commit = dict['stdout'][-1]
-    let dict = FugitiveExecute(["log", "--format=%B", "-n", "1", commit])
-    if dict['exit_status'] == 0
-      let message = dict['stdout'][0]
-      if message !~# ".*SW-[0-9][0-9][0-9][0-9].*"
-        let dict = FugitiveExecute(["rev-parse", commit . "~1"])
-        if dict['exit_status'] == 0
-          let bpoint = dict['stdout'][0]
-        endif
-      endif
-    endif
+    let mainline = empty(a:arg) ? s:MasterOrThrow() : a:arg
+    call s:RefExistsOrThrow(mainline)
+    let bpoint = s:CommonParentOrThrow(head, mainline)
   endif
-  if !exists('bpoint')
-    echo "Could not determine branch point, aborting review"
-    return
+  " Load files for review.
+  " If possible, make the diff windows editable by not passing a ref to fugitive
+  if bpoint == head
+    exe "Git difftool --name-only"
+    let bufs = map(getqflist(), "v:val.bufnr")
+    call map(bufs, 'setbufvar(v:val, "commitish", "0")')
+  else
+    exe "Git difftool --name-only " . bpoint
+    let bufs = map(getqflist(), "v:val.bufnr")
+    call map(bufs, 'setbufvar(v:val, "commitish", bpoint)')
   endif
-
-  exe "Git difftool --name-only " . bpoint
   call setqflist([], 'a', #{title: "Review"})
-  let bufs = map(getqflist(), "v:val.bufnr")
-  for b in bufs
-    call setbufvar(b, "commitish", bpoint)
-  endfor
   let g:review_stack = [getqflist()]
+endfunction
+
+function s:Review(bang, arg)
+  try
+    call s:TryReview(a:bang, a:arg)
+  catch
+    echo v:exception
+  endtry
 endfunction
 
 command! -nargs=? -bang -complete=customlist,OriginCompl Review call <SID>Review("<bang>", <q-args>)
