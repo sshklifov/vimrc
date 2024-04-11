@@ -32,6 +32,9 @@ autocmd BufWritePost /home/$USER/.config/nvim/init.vim source ~/.config/nvim/ini
 """"""""""""""""""""""""""""Plugin settings"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
+" sshklifov/debug
+let g:termdebug_ignore_no_such = 1
+
 " Tabulous
 let tabulousLabelLeftStr = ' ['
 let tabulousLabelRightStr = '] '
