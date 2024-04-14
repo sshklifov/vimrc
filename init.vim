@@ -107,7 +107,7 @@ set shiftwidth=2
 set tabstop=2
 set softtabstop=0
 set cinoptions=L0,l1,b0,g1,t0,(s,U1,N-s
-autocmd FileType c,cpp setlocal cc=101
+autocmd BufEnter *.cpp,*.cc,*.c setlocal cc=101
 
 cabbr Gd lefta Gdiffsplit
 cabbr Gl Gclog!
@@ -190,7 +190,7 @@ set fillchars+=vert:\|
 
 " Show indentation
 set list
-set list lcs=tab:\|\ 
+set lcs=tab:\|\ 
 
 function! GetFileStatusLine()
   " Kind of resticts maximum returned length
@@ -1045,7 +1045,6 @@ function! s:DebugStartPost(args)
   let quick_load = has_key(a:args, "symbols") && !a:args["symbols"]
 
   command! -nargs=0 Capture call TermDebugGoToCapture()
-  command! -nargs=0 Asm call TermDebugToggleAsm()
   command! -nargs=0 Gdb call TermDebugGoToGdb()
   command! -nargs=0 Up call TermDebugGoUp("/home/stef")
   command! -nargs=0 Pwd call TermDebugShowPwd()
@@ -1108,7 +1107,6 @@ function! s:DebugStopPre()
   silent! nunmap <leader>pc
 
   silent! delcommand Capture
-  silent! delcommand Asm
   silent! delcommand Gdb
   silent! delcommand Up
   silent! delcommand Pwd
