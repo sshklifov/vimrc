@@ -107,7 +107,7 @@ set shiftwidth=2
 set tabstop=2
 set softtabstop=0
 set cinoptions=L0,l1,b0,g1,t0,(s,U1,N-s
-autocmd BufEnter *.cpp,*.cc,*.c setlocal cc=101
+autocmd BufEnter *.cpp,*.cc,*.c,*.h setlocal cc=101
 
 cabbr Gd lefta Gdiffsplit
 cabbr Gl Gclog!
@@ -454,8 +454,7 @@ function! s:DiffOtherExecute(cmd)
   endif
 endfunction
 
-function! s:ToggleDiffMaps()
-  " echoerr v:option_command
+function! s:EnableDiffMaps()
   if v:option_new
     " Diff put
     nnoremap <expr> dp <SID>Operator("diffput", 1)
@@ -478,7 +477,7 @@ function! s:ToggleDiffMaps()
   endif
 endfunction
 
-autocmd! OptionSet diff call s:ToggleDiffMaps()
+autocmd! OptionSet diff call s:EnableDiffMaps()
 
 function! s:GetUnstaged()
   let dict = FugitiveExecute(["ls-files", "--exclude-standard", "--modified"])
@@ -563,7 +562,7 @@ function! s:GetRefs(ref_dirs, arg)
       let result += Find(dir, "-type", "f", "-regex", pat, "-printf", "%P\n")
     endif
   endfor
-  return uniq(sort(result))
+  return result
 endfunction
 
 command! -nargs=1 -complete=customlist,BranchCompl Branch call <SID>SwitchToBranch(<q-args>)
@@ -935,6 +934,15 @@ endfunction
 
 nnoremap <silent> [n :call <SID>Context(v:true)<CR>
 nnoremap <silent> ]n :call <SID>Context(v:false)<CR>
+
+function! s:ContextMotion()
+  call s:Context(v:false)
+  let end = line('.')
+  call s:Context(v:true)
+  exe printf("normal V%dG", end)
+endfunction
+
+omap an <cmd>call <SID>ContextMotion()<CR>
 "}}}
 
 """"""""""""""""""""""""""""Debugging"""""""""""""""""""""""""""" {{{
@@ -1074,6 +1082,7 @@ function! s:DebugStartPost(args)
   call TermDebugSendCommand("set breakpoint pending on")
   " call TermDebugSendCommand("set debuginfod enabled off")
   call TermDebugSendCommand("set max-completions 20")
+  call TermDebugSendCommand("set startup-with-shell off")
   if quick_load
     call TermDebugSendCommand("set auto-solib-add off")
   endif
@@ -1422,7 +1431,7 @@ function s:ObsidianMake(...)
   let env = printf("source %s/environment-setup-armv8a-aisys-linux", sdk)
 
   if repo == 'camera_engine_rkaiq'
-    let cmake = "cmake -S. -B" . s:build_type
+    let cmake = printf("cmake -S. -B%s -DCMAKE_BUILD_TYPE=%s", s:build_type, s:build_type)
     let cmake .= " -DIQ_PARSER_V2_EXTRA_CFLAGS='-I/opt/aisys/obsidian_10/sysroots/armv8a-aisys-linux/usr/include/rockchip-uapi;"
     let cmake .= "-I/opt/aisys/obsidian_10/sysroots/armv8a-aisys-linux/usr/include'"
     let cmake .= " -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DISP_HW_VERSION='-DISP_HW_V30' -DARCH='aarch64' -DRKAIQ_TARGET_SOC='rk3588'"
