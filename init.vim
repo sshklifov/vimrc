@@ -1589,10 +1589,14 @@ call s:ChangeHost('p10', 0)
 """"""""""""""""""""""""""""Applications"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 let s:job_list = []
-function! s:RunObsidianVideo()
+function! s:RunObsidianVideo(spin)
   let bufname = 'Obsidian video'
   if bufexists(bufname)
     echo "Already running"
+    return
+  endif
+
+  if a:spin && s:BootstrapSpin("obsidian_video.cc")
     return
   endif
 
@@ -1610,7 +1614,11 @@ function! s:RunObsidianVideo()
   let cmd = "setcap cap_sys_nice+ep /tmp/obsidian-video"
   call add(cmds, cmd)
 
-  let cmd = "sudo -u rock-video /tmp/obsidian-video"
+  if a:spin
+    let cmd = "sudo -u rock-video SPIN_APPLICATION=1 /tmp/obsidian-video"
+  else
+    let cmd = "sudo -u rock-video /tmp/obsidian-video"
+  endif
   call add(cmds, cmd)
 
   let was_win = win_getid()
@@ -1626,12 +1634,14 @@ function! s:RunObsidianVideo()
   call win_gotoid(was_win)
 endfunction
 
-command! -nargs=0 Video call <SID>RunObsidianVideo()
-
-function! s:RunRtspServer()
+function! s:RunRtspServer(spin)
   let bufname = 'Rtsp server'
   if bufexists(bufname)
     echo "Already running"
+    return
+  endif
+
+  if a:spin && s:BootstrapSpin("rtsp_server.cc")
     return
   endif
 
@@ -1649,7 +1659,11 @@ function! s:RunRtspServer()
   let cmd = "setcap cap_sys_nice+ep /tmp/rtsp-server"
   call add(cmds, cmd)
 
-  let cmd = "sudo -u rtsp-server /tmp/rtsp-server"
+  if a:spin
+    let cmd = "sudo -u rtsp-server SPIN_APPLICATION=1 /tmp/rtsp-server"
+  else
+    let cmd = "sudo -u rtsp-server /tmp/rtsp-server"
+  endif
   call add(cmds, cmd)
 
   let was_win = win_getid()
@@ -1665,7 +1679,21 @@ function! s:RunRtspServer()
   call win_gotoid(was_win)
 endfunction
 
-command! -nargs=0 Rtsp call <SID>RunRtspServer()
+function! s:BootstrapSpin(main_file)
+  let origw = win_getid()
+  exe "split /home/stef/obsidian-video/application/src/" . a:main_file
+  let bootstrap = search("volatile int spin") <= 0
+  if bootstrap
+    let lnum = search("int main")
+    call append(lnum, '  while (spin);')
+    call append(lnum, '  volatile int spin = getenv("SPIN_APPLICATION") != nullptr;')
+    w
+    Resync
+  endif
+  q
+  call win_gotoid(origw)
+  return bootstrap
+endfunction
 
 function! s:KillApplications()
   if TermDebugIsOpen()
@@ -1683,72 +1711,32 @@ endfunction
 
 command! -nargs=0 Kill call <SID>KillApplications()
 
-function! s:CheckSpinning(main_file, ...)
-  let origw = win_getid()
-  exe "split /home/stef/obsidian-video/application/src/" . a:main_file
-
-  if search("volatile int spin") <= 0
-    if a:0 == 0
-      quit
-      call win_gotoid(origw)
-      return 0
-    endif
-    let lnum = search("int main")
-    call append(lnum, printf("  volatile int spin = %d;", a:0))
-    call append(lnum + 1, "  while (spin);")
-    throw "Bootstrapping spinning code..."
-  endif
-
-  let line = getline('.')
-  let state = (line =~ "1")
-  if a:0 > 0
-    let expected = a:1
-    if state != expected
-      let line = substitute(line, state, expected, '')
-      call setline('.', line)
-      write
-      Resync
-    endif
-  endif
-  quit
-  call win_gotoid(origw)
-  return state
-endfunction
-
-command! -nargs=0 -bang SpinVideo call s:CheckSpinning("obsidian_video.cc", <bang>1)
-command! -nargs=0 -bang SpinRtsp call s:CheckSpinning("rtsp_server.cc", <bang>1)
-
-function! s:AttachToSpinning(main_file)
-  if a:main_file =~ "video"
-    let pid = s:RemotePid(s:host, "video")
-  elseif a:main_file =~ "rtsp"
-    let pid = s:RemotePid(s:host, "rtsp")
-  endif
+function! s:DebugApplication(app, run)
+  let pid = s:RemotePid(s:host, a:app)
   if !exists('pid') || pid < 0
     return
   endif
 
-  let is_spinning = s:CheckSpinning(a:main_file)
   let opts = #{ssh: s:host, proc: pid}
-  if is_spinning
-    let cmds = ['set var spin = 0', 'c']
-    if &ft == 'cpp' || &ft == 'c'
-      let cmds = ['br ' . s:GetDebugLoc()] + cmds
-    endif
-    let opts['cmds'] = cmds
+  if a:run
+    let opts['cmds'] = ['br ' . s:GetDebugLoc(), 'set var spin = 0', 'c']
+  else
+    let opts['cmds'] = ['set var spin = 0']
   endif
   call s:Debug(opts)
 endfunction
 
-command -nargs=0 AttachVideo call s:AttachToSpinning("obsidian_video.cc")
-command -nargs=0 AttachRtsp call s:AttachToSpinning("rtsp_server.cc")
-
 nnoremap <silent> <leader>k <cmd>Kill<CR>
 nnoremap <silent> <leader>re <cmd>Resync<CR>
-nnoremap <silent> <leader>rv <cmd>Video<CR>
-nnoremap <silent> <leader>rs <cmd>Rtsp<CR>
-nnoremap <silent> <leader>av <cmd>AttachVideo<CR>
-nnoremap <silent> <leader>as <cmd>AttachRtsp<CR>
+
+nnoremap <silent> <leader>rv <cmd>call <SID>RunObsidianVideo(v:false)<CR>
+nnoremap <silent> <leader>sv <cmd>call <SID>RunObsidianVideo(v:true)<CR>
+nnoremap <silent> <leader>rs <cmd>call <SID>RunRtspServer(v:false)<CR>
+nnoremap <silent> <leader>ss <cmd>call <SID>RunRtspServer(v:true)<CR>
+nnoremap <silent> <leader>av <cmd>call <SID>DebugApplication("video", v:false)<CR>
+nnoremap <silent> <leader>as <cmd>call <SID>DebugApplication("rtsp", v:false)<CR>
+nnoremap <silent> <leader>bv <cmd>call <SID>DebugApplication("video", v:true)<CR>
+nnoremap <silent> <leader>bs <cmd>call <SID>DebugApplication("rtsp", v:true)<CR>
 "}}}
 
 """"""""""""""""""""""""""""Testing"""""""""""""""""""""""""""" {{{
