@@ -34,6 +34,9 @@ autocmd BufWritePost /home/$USER/.config/nvim/init.vim source ~/.config/nvim/ini
 
 " sshklifov/debug
 let g:termdebug_ignore_no_such = 1
+let g:termdebug_override_s_and_n = 1
+let g:termdebug_override_up_and_down = 1
+let g:termdebug_override_finish_and_return = 1
 
 " Tabulous
 let tabulousLabelLeftStr = ' ['
@@ -106,7 +109,7 @@ set expandtab
 set shiftwidth=2
 set tabstop=2
 set softtabstop=0
-set cinoptions=L0,l1,b0,g1,t0,(s,U1,N-s
+set cinoptions=L0,l1,b0,g1,h1,t0,(s,U1,N-s
 autocmd BufEnter *.cpp,*.cc,*.c,*.h setlocal cc=101
 
 cabbr Gd lefta Gdiffsplit
@@ -169,6 +172,7 @@ set splitright
 set nottimeout
 set notimeout
 set foldmethod=manual
+set nofoldenable
 set shell=/bin/bash
 
 " Display better the currently selected entry in quickfix
@@ -288,7 +292,23 @@ function! s:SynStack()
   echo map(synstack(line('.'), col('.')), 'synIDattr(v:val, "name")')
 endfunc
 
-command! -nargs=0 CursorSym call <SID>SynStack()
+command! -nargs=0 CursorSym call s:SynStack()
+
+function s:ShowHighlights()
+  let hls = split(execute("highlight"), "\n")
+  call map(hls, "split(v:val, '\\s')[0]")
+  tabnew
+  setlocal buftype=nofile
+  call appendbufline(bufnr(), 0, 'List of highlights in vim:')
+  let ns = nvim_create_namespace("")
+  for hl in hls
+    call append('$', hl)
+    let line = nvim_buf_line_count(0) - 1
+    call nvim_buf_set_extmark(0, ns, line, 0, #{end_col: len(hl), hl_group: hl})
+  endfor
+endfunction
+
+command! -nargs=0 ChooseHighlight call s:ShowHighlights()
 " }}}
 
 """"""""""""""""""""""""""""IDE maps"""""""""""""""""""""""""""" {{{
@@ -700,7 +720,7 @@ function! s:ReviewCompleteFiles(cmd_bang, arg) abort
   endif
   call add(g:review_stack, new_items)
   if empty(new_items)
-    echo "Review completed!"
+    call nvim_echo([["Review completed", "WarningMsg"]], v:true, #{})
     unlet g:review_stack
   else
     call DisplayInQf(new_items, "Review")
@@ -1054,7 +1074,6 @@ function! s:DebugStartPost(args)
 
   command! -nargs=0 Capture call TermDebugGoToCapture()
   command! -nargs=0 Gdb call TermDebugGoToGdb()
-  command! -nargs=0 Up call TermDebugGoUp("/home/stef")
   command! -nargs=0 Pwd call TermDebugShowPwd()
   command! -nargs=0 Backtrace call TermDebugBacktrace()
   command! -nargs=? Threads call TermDebugThreadInfo(<q-args>)
@@ -1080,7 +1099,6 @@ function! s:DebugStartPost(args)
   call TermDebugSendCommand("set print thread-events off")
   call TermDebugSendCommand("set print object on")
   call TermDebugSendCommand("set breakpoint pending on")
-  " call TermDebugSendCommand("set debuginfod enabled off")
   call TermDebugSendCommand("set max-completions 20")
   call TermDebugSendCommand("set startup-with-shell off")
   if quick_load
@@ -1117,7 +1135,6 @@ function! s:DebugStopPre()
 
   silent! delcommand Capture
   silent! delcommand Gdb
-  silent! delcommand Up
   silent! delcommand Pwd
   silent! delcommand Backtrace
   silent! delcommand Threads
@@ -1412,6 +1429,11 @@ endfunction
 let s:build_type = "Debug"
 
 function s:ObsidianMake(...)
+  let repo = FugitiveWorkTree()
+  if empty(repo)
+    echo "Not inside repo"
+    return
+  endif
   let repo = split(FugitiveWorkTree(), "/")[-1]
   let obsidian_repos = ["obsidian-video", "libalcatraz", "mpp", "camera_engine_rkaiq"]
   if index(obsidian_repos, repo) < 0
