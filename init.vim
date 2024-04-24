@@ -1039,7 +1039,7 @@ endfunction
 " - cmds. Additional commands to execute once the inferior is loaded
 function! s:Debug(args)
   let required = ['exe', 'proc']
-  let optional = ['symbols', 'ssh', 'cmds']
+  let optional = ['symbols', 'ssh', 'user', 'cmds']
   let req_keys = filter(keys(a:args), "index(required, v:val) >= 0")
   if len(req_keys) != 1
     echo "Must pass exactly one of: " . string(required)
@@ -1061,11 +1061,18 @@ function! s:Debug(args)
   autocmd! User TermDebugStopPre call s:DebugStopPre()
   exe "autocmd! User TermDebugRunPost call s:DebugRunPost(" . string(a:args) . ")"
 
+  " Open GDB
   if has_key(a:args, "ssh")
-    call TermDebugStart(a:args["ssh"])
+    if has_key(a:args, "user")
+      call TermDebugStart(a:args["ssh"], a:args["user"])
+    else
+      call TermDebugStart(a:args["ssh"])
+    endif
   else
     call TermDebugStart()
   endif
+
+  " Run configurations
   call s:DebugStartPost(a:args)
 endfunction
 
@@ -1099,8 +1106,6 @@ function! s:DebugStartPost(args)
   call TermDebugSendCommand("set print thread-events off")
   call TermDebugSendCommand("set print object on")
   call TermDebugSendCommand("set breakpoint pending on")
-  call TermDebugSendCommand("set max-completions 20")
-  call TermDebugSendCommand("set startup-with-shell off")
   if quick_load
     call TermDebugSendCommand("set auto-solib-add off")
   endif
@@ -1405,7 +1410,7 @@ endfunction
 function! s:RemoteAttach(host, proc)
   let pid = s:RemotePid(a:host, a:proc)
   if pid > 0
-    let opts = #{ssh: a:host, proc: pid[0]}
+    let opts = #{ssh: a:host, proc: pid}
     call s:Debug(opts)
   endif
 endfunction
@@ -1427,6 +1432,7 @@ endfunction
 """"""""""""""""""""""""""""Building"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 let s:build_type = "Debug"
+let s:sdk_dir = "/opt/aisys/obsidian_p10"
 
 function s:ObsidianMake(...)
   let repo = FugitiveWorkTree()
@@ -1435,27 +1441,26 @@ function s:ObsidianMake(...)
     return
   endif
   let repo = split(FugitiveWorkTree(), "/")[-1]
-  let obsidian_repos = ["obsidian-video", "libalcatraz", "mpp", "camera_engine_rkaiq"]
+  let obsidian_repos = ["obsidian-video", "libalcatraz", "mpp", "camera_engine_rkaiq", "badge-and-face"]
   if index(obsidian_repos, repo) < 0
     echo "Unsupported repo: " . repo
     return
   endif
 
-  const sdk = "/opt/aisys/obsidian_10"
   let common_flags = join([
-        \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/", sdk),
-        \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/aarch64-aisys-linux", sdk),
+        \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/", s:sdk_dir),
+        \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/aarch64-aisys-linux", s:sdk_dir),
         \ "-O0 -ggdb -U_FORTIFY_SOURCE"])
   let cxxflags = "export CXXFLAGS=" . string(common_flags)
   let cflags = "export CFLAGS=" . string(common_flags)
 
   let dir = printf("cd %s", FugitiveWorkTree())
-  let env = printf("source %s/environment-setup-armv8a-aisys-linux", sdk)
+  let env = printf("source %s/environment-setup-armv8a-aisys-linux", s:sdk_dir)
 
   if repo == 'camera_engine_rkaiq'
     let cmake = printf("cmake -S. -B%s -DCMAKE_BUILD_TYPE=%s", s:build_type, s:build_type)
-    let cmake .= " -DIQ_PARSER_V2_EXTRA_CFLAGS='-I/opt/aisys/obsidian_10/sysroots/armv8a-aisys-linux/usr/include/rockchip-uapi;"
-    let cmake .= "-I/opt/aisys/obsidian_10/sysroots/armv8a-aisys-linux/usr/include'"
+    let cmake .= printf(" -DIQ_PARSER_V2_EXTRA_CFLAGS='-I%s/sysroots/armv8a-aisys-linux/usr/include/rockchip-uapi;", s:sdk_dir)
+    let cmake .= printf("-I%s/sysroots/armv8a-aisys-linux/usr/include'", s:sdk_dir)
     let cmake .= " -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DISP_HW_VERSION='-DISP_HW_V30' -DARCH='aarch64' -DRKAIQ_TARGET_SOC='rk3588'"
   else
     let cmake = printf("cmake -B %s -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=%s", s:build_type, s:build_type)
@@ -1580,6 +1585,31 @@ endfunction
 
 command! -nargs=0 Resync call s:Resync()
 
+function! s:PrepareApp(exe)
+  if a:exe =~ "obsidian-video$"
+    let cmd = printf("cp %s /tmp/obsidian-video; setcap cap_sys_nice+ep /tmp/obsidian-video", a:exe)
+    let job_id = jobstart(["ssh", s:host, cmd])
+    call jobwait([job_id])
+    return #{exe: "/tmp/obsidian-video", ssh: s:host, user: "rock-video"}
+  elseif a:exe =~ "rtsp-server$"
+    let cmd = printf("cp %s /tmp/rtsp-server; setcap cap_sys_nice+ep /tmp/rtsp-server", a:exe)
+    let id = jobstart(["ssh", s:host, cmd])
+    call jobwait([id])
+    return #{exe: "/tmp/rtsp-server", ssh: s:host, user: "rtsp-server"}
+  endif
+  return #{exe: a:exe, ssh: s:host}
+endfunction
+
+function! s:DebugApp(exe, run)
+  let opts = s:PrepareApp(a:exe)
+  if a:run
+    let br = 'br ' . s:GetDebugLoc()
+    let run = 'c'
+    let opts['cmds'] = [br, run]
+  endif
+  call s:Debug(opts)
+endfunction
+
 function s:ChangeHost(host, check)
   if a:check
     call system(["ssh", "-o", "ConnectTimeout=1", a:host, "exit"])
@@ -1588,10 +1618,9 @@ function s:ChangeHost(host, check)
       return
     endif
   endif
-
   let s:host = a:host
-  exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start call <SID>RemoteStart('%s', <q-args>)", s:host)
-  exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run call <SID>RemoteRun('%s', <q-args>)", s:host)
+  exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start call <SID>DebugApp(<q-args>, v:false)")
+  exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run call <SID>DebugApp(<q-args>, v:true)")
   exe printf("command! -nargs=1 Attach call <SID>RemoteAttach('%s', <q-args>)", s:host)
   exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs call <SID>Sshfs('%s', <q-args>)", s:host)
 endfunction
@@ -1602,163 +1631,51 @@ function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return ['p10']
+  return ['p10', 'broken_rgb']
 endfunction
 
-call s:ChangeHost('p10', 0)
-"}}}
+call s:ChangeHost('broken_rgb', 0)
 
-""""""""""""""""""""""""""""Applications"""""""""""""""""""""""""""" {{{
-""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-let s:job_list = []
-function! s:RunObsidianVideo(spin)
-  let bufname = 'Obsidian video'
-  if bufexists(bufname)
-    echo "Already running"
-    return
-  endif
-
-  if a:spin && s:BootstrapSpin("obsidian_video.cc")
-    return
-  endif
-
-  let cmds = []
-
-  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service", "obsidian-video"]
-  for elem in stop_list
-    let cmd = "systemctl stop " . elem
-    call add(cmds, cmd)
-  endfor
-
-  let cmd = printf("cp /var/tmp/%s/application/obsidian-video /tmp", s:build_type)
-  call add(cmds, cmd)
-
-  let cmd = "setcap cap_sys_nice+ep /tmp/obsidian-video"
-  call add(cmds, cmd)
-
-  if a:spin
-    let cmd = "sudo -u rock-video SPIN_APPLICATION=1 /tmp/obsidian-video"
-  else
-    let cmd = "sudo -u rock-video /tmp/obsidian-video"
-  endif
-  call add(cmds, cmd)
-
-  let was_win = win_getid()
-  tabnew
-
-  let id = termopen(["ssh", s:host])
-  call cursor("$", 1)
-  call add(cmds, "")
-  call chansend(id, cmds)
-  exe "file " . bufname
-  call add(s:job_list, id)
-
-  call win_gotoid(was_win)
-endfunction
-
-function! s:RunRtspServer(spin)
-  let bufname = 'Rtsp server'
-  if bufexists(bufname)
-    echo "Already running"
-    return
-  endif
-
-  if a:spin && s:BootstrapSpin("rtsp_server.cc")
-    return
-  endif
-
-  let cmds = []
-
-  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service"]
-  for elem in stop_list
-    let cmd = "systemctl stop " . elem
-    call add(cmds, cmd)
-  endfor
-
-  let cmd = printf("cp /var/tmp/%s/application/rtsp-server /tmp", s:build_type)
-  call add(cmds, cmd)
-
-  let cmd = "setcap cap_sys_nice+ep /tmp/rtsp-server"
-  call add(cmds, cmd)
-
-  if a:spin
-    let cmd = "sudo -u rtsp-server SPIN_APPLICATION=1 /tmp/rtsp-server"
-  else
-    let cmd = "sudo -u rtsp-server /tmp/rtsp-server"
-  endif
-  call add(cmds, cmd)
-
-  let was_win = win_getid()
-  tabnew
-
-  let id = termopen(["ssh", s:host])
-  call cursor("$", 1)
-  call add(cmds, "")
-  call chansend(id, cmds)
-  call add(s:job_list, id)
-  exe "file " . bufname
-
-  call win_gotoid(was_win)
-endfunction
-
-function! s:BootstrapSpin(main_file)
-  let origw = win_getid()
-  exe "split /home/stef/obsidian-video/application/src/" . a:main_file
-  let bootstrap = search("volatile int spin") <= 0
-  if bootstrap
-    let lnum = search("int main")
-    call append(lnum, '  while (spin);')
-    call append(lnum, '  volatile int spin = getenv("SPIN_APPLICATION") != nullptr;')
-    w
-    Resync
-  endif
-  q
-  call win_gotoid(origw)
-  return bootstrap
-endfunction
-
-function! s:KillApplications()
-  if TermDebugIsOpen()
-    call TermDebugQuit()
-  endif
-  for id in s:job_list
-    let chan_info = nvim_get_chan_info(id)
-    call jobstop(id)
-    if has_key(chan_info, 'buffer')
-      exe "bwipe! " . chan_info['buffer']
+function! s:StopServices(bang)
+  function! s:ExitHandler(id, code, event)
+    if a:code != 0
+      echo "Stopping of services failed"
     endif
+  endfunction
+
+  let cmds = []
+  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service", "obsidian-video"]
+  for service in stop_list
+    let cmd = "systemctl stop " . service
+    call add(cmds, cmd)
   endfor
-  let s:job_list = []
-endfunction
 
-command! -nargs=0 Kill call <SID>KillApplications()
-
-function! s:DebugApplication(app, run)
-  let pid = s:RemotePid(s:host, a:app)
-  if !exists('pid') || pid < 0
-    return
-  endif
-
-  let opts = #{ssh: s:host, proc: pid}
-  if a:run
-    let opts['cmds'] = ['br ' . s:GetDebugLoc(), 'set var spin = 0', 'c']
+  let job_args = ["ssh", s:host, join(cmds, ";")]
+  let job_opts = #{on_exit: function('s:ExitHandler')}
+  if a:bang
+    bot new
+    let id = termopen(job_args, job_opts)
   else
-    let opts['cmds'] = ['set var spin = 0']
+    let id = jobstart(job_args, job_opts)
   endif
-  call s:Debug(opts)
+  call jobwait([id])
 endfunction
 
-nnoremap <silent> <leader>k <cmd>Kill<CR>
-nnoremap <silent> <leader>re <cmd>Resync<CR>
+function! s:PrepareVideo()
+  call s:StopServices(v:false)
+  let opts = s:PrepareApp("/var/tmp/Debug/application/obsidian-video")
+  let @+ = printf("sudo -u %s %s", opts['user'], opts['exe'])
+endfunction
 
-nnoremap <silent> <leader>rv <cmd>call <SID>RunObsidianVideo(v:false)<CR>
-nnoremap <silent> <leader>sv <cmd>call <SID>RunObsidianVideo(v:true)<CR>
-nnoremap <silent> <leader>rs <cmd>call <SID>RunRtspServer(v:false)<CR>
-nnoremap <silent> <leader>ss <cmd>call <SID>RunRtspServer(v:true)<CR>
-nnoremap <silent> <leader>av <cmd>call <SID>DebugApplication("video", v:false)<CR>
-nnoremap <silent> <leader>as <cmd>call <SID>DebugApplication("rtsp", v:false)<CR>
-nnoremap <silent> <leader>bv <cmd>call <SID>DebugApplication("video", v:true)<CR>
-nnoremap <silent> <leader>bs <cmd>call <SID>DebugApplication("rtsp", v:true)<CR>
+function! s:PrepareStream()
+  call s:StopServices(v:false)
+  let opts = s:PrepareApp("/var/tmp/Debug/application/rtsp-server")
+  let @+ = printf("sudo -u %s %s", opts['user'], opts['exe'])
+endfunction
+
+nnoremap <silent> <leader>re <cmd>Resync<CR>
+nnoremap <silent> <leader>rv <cmd>call <SID>PrepareVideo()<CR>
+nnoremap <silent> <leader>rs <cmd>call <SID>PrepareStream()<CR>
 "}}}
 
 """"""""""""""""""""""""""""Testing"""""""""""""""""""""""""""" {{{
