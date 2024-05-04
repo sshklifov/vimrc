@@ -1713,7 +1713,11 @@ function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   return ['p10', 'broken_rgb', 'miro_camera']
 endfunction
 
-call s:ChangeHost('p10', 0)
+if readfile("/etc/hostname") == ["npc"]
+  call s:ChangeHost('p10', v:false)
+else
+  call s:ChangeHost('localhost', v:false)
+endif
 
 function! s:StopServices()
   let cmds = []
