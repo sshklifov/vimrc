@@ -52,26 +52,23 @@ end
 -- Auto completion
 
 function ShowAutoCompletion(...)
-  local vargs = ({...})[1]
-  local force_pum = vim.fn.pumvisible() ~= 0 or vargs ~= nil
-
   if not vim.fn.pumvisible() == 0 then
-    return ClearAutoCompletion()
+    return
   end
+  local vargs = ({...})[1]
+  local force_full = vargs ~= nil
 
   local bufnr = api.nvim_get_current_buf()
   local pos = api.nvim_win_get_cursor(0)
   local cursor_pos = pos[2]
   local line = api.nvim_get_current_line()
   local prefix = vim.fn.matchstr(string.sub(line, 1, cursor_pos), '\\k*$')
-  if string.len(prefix) == 0 and not force_pum then
-    return ClearAutoCompletion()
+  if string.len(prefix) == 0 and not force_full then
+    return
   end
 
   local params = vim.lsp.util.make_position_params()
   local handler = function(err, res, _)
-    -- Clear the autocompletion as late as possible. Avoids the delay with in the LSP response
-    ClearAutoCompletion()
     if err or not res or vim.tbl_isempty(res) then
       return
     end
@@ -88,19 +85,10 @@ function ShowAutoCompletion(...)
     if old_text == new_text then
       return
     end
-
-    local end_of_line = (cursor_pos == string.len(line))
-    if force_pum then
+    if force_full then
       -- Display whole completion in pop up menu
       local insert_pos = cursor_pos + 1 - string.len(prefix)
       vim.fn.complete(insert_pos, complete_items)
-    elseif end_of_line then
-      -- Display inline
-      local text = string.sub(new_text, string.len(old_text) + 1, -1)
-      local line_pos = pos[1] - 1
-      local opts = {virt_text = {{text, "NonText"}}, virt_text_win_col = col_end}
-      local ns = api.nvim_create_namespace("autocomplete")
-      api.nvim_buf_set_extmark(0, ns, line_pos, -1, opts)
     else
       -- Display a single completion (what will be TAB completed) in pum
       local insert_pos = cursor_pos + 1 - string.len(prefix)
@@ -109,11 +97,6 @@ function ShowAutoCompletion(...)
   end
 
   vim.lsp.buf_request(bufnr, 'textDocument/completion', params, handler)
-end
-
-function ClearAutoCompletion()
-  local ns = api.nvim_create_namespace("autocomplete")
-  api.nvim_buf_clear_namespace(0, ns, 0, -1)
 end
 
 function GetAutoCompletion()
@@ -125,19 +108,6 @@ function GetAutoCompletion()
     return text
   end
   return vim.fn.nr2char(9)
-end
-
-function AcceptAutoCompletion()
-  -- TODO just apply the text edit dummy!
-  local res = GetAutoCompletion()
-  ClearAutoCompletion()
-
-  if vim.fn.pumvisible() == 1 then
-    -- Return <C-y>
-    return vim.fn.nr2char(25)
-  else
-    return res
-  end
 end
 
 -- Keymaps and registration
@@ -177,10 +147,8 @@ local OnCclsAttach = function(_, bufnr)
   autocmd('CursorMoved', function() vim.lsp.buf.clear_references() end)
 
   autocmd('TextChangedI', function() ShowAutoCompletion() end)
-  autocmd('InsertLeave', function() ClearAutoCompletion() end)
 
   buf_set_keymap('i', '<C-space>', '<cmd>lua ShowAutoCompletion({force_pum=true})<CR>', {noremap=true})
-  buf_set_keymap('i', '<Tab>', 'luaeval("AcceptAutoCompletion()")', {noremap=true, silent=true, expr=true})
 end
 
 lspconfig.clangd.setup {
@@ -263,7 +231,7 @@ local function copy(lines, _)
 end
 
 local function paste()
-  return {vim.fn.split(vim.fn.getreg(''), '\n'), vim.fn.getregtype('')}
+  return {{}, ''}
 end
 
 if vim.fn.eval("$SSH_TTY") ~= "" then

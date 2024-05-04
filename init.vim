@@ -103,6 +103,7 @@ set diffopt+=vertical
 " Open vimrc quick (muy importante)
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
 nnoremap <silent> <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
+nnoremap <silent> <leader>dv :e ~/.local/share/nvim/plugged/debug/plugin/termdebug.vim<CR>
 
 " Indentation settings
 set expandtab
@@ -160,6 +161,8 @@ set wildcharm=9
 set wildignore=*.o,*.out
 set wildignorecase
 set wildmode=full
+
+inoremap <expr> <Tab> pumvisible() ? "\<C-y>" : "\<Tab>"
 
 cnoremap <expr> <Up> pumvisible() ? "\<C-p>" : "\<Up>"
 cnoremap <expr> <Down> pumvisible() ? "\<C-n>" : "\<Down>"
@@ -489,11 +492,17 @@ function! s:EnableDiffMaps()
     " Good ol' regular diff commands
     nnoremap dpp dp
     nnoremap doo do
+    " Visual mode
+    vnoremap dp :diffput<CR>
+    vnoremap do :diffget<CR>
   else
-    let list = ["dp", "dP", "do", "dO", "dpu", "dpw", "dpp", "dpp"]
-    for bind in list
+    let normal_list = ["dp", "dP", "do", "dO", "dpu", "dpw", "dpp", "dpp"]
+    for bind in normal_list
       silent! "nunmap " . bind
     endfor
+    " Visual mode
+    silent! vunmap dp
+    silent! vunmap do
   endif
 endfunction
 
@@ -963,6 +972,12 @@ function! s:ContextMotion()
 endfunction
 
 omap an <cmd>call <SID>ContextMotion()<CR>
+
+function! s:FoldMotion()
+  normal V[z]z
+endfunction
+
+omap az <cmd>call <SID>FoldMotion()<CR>
 "}}}
 
 """"""""""""""""""""""""""""Debugging"""""""""""""""""""""""""""" {{{
@@ -973,18 +988,11 @@ function! s:StartDebug(exe)
   call s:Debug(opts)
 endfunction
 
-command! -nargs=? -complete=customlist,ExeCompl Start call s:StartDebug(<q-args>)
-
 function! s:RunDebug(exe)
   let exe = empty(a:exe) ? "a.out" : a:exe
-  let br_cmd = "br " . s:GetDebugLoc()
-  let run_cmd = "c"
-  
-  let opts = #{exe: exe, cmds: [br_cmd, run_cmd]}
+  let opts = #{exe: exe, br: s:GetDebugLoc()}
   call s:Debug(opts)
 endfunction
-
-command! -nargs=? -complete=customlist,ExeCompl Run call s:RunDebug(<q-args>)
 
 function! ExeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -1011,8 +1019,6 @@ function! s:AttachDebug(proc)
   call s:Debug(opts)
 endfunction
 
-command! -nargs=1 -complete=customlist,AttachCompl Attach call s:AttachDebug(<q-args>)
-
 function! AttachCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
@@ -1033,13 +1039,14 @@ endfunction
 " Available modes:
 " - exe. Pass executable + arguments
 " - proc. Process pid to attach.
+" - headless. Do not run any inferior
 " Other arguments:
 " - symbols. Whether to load symbols or not. Used for faster loading of gdb.
 " - ssh. Launch GDB over ssh with the given address.
-" - cmds. Additional commands to execute once the inferior is loaded
+" - br. Place a breakpoint at location and run inferior.
 function! s:Debug(args)
-  let required = ['exe', 'proc']
-  let optional = ['symbols', 'ssh', 'user', 'cmds']
+  let required = ['exe', 'proc', 'headless']
+  let optional = ['symbols', 'ssh', 'user', 'br']
   let req_keys = filter(keys(a:args), "index(required, v:val) >= 0")
   if len(req_keys) != 1
     echo "Must pass exactly one of: " . string(required)
@@ -1059,7 +1066,7 @@ function! s:Debug(args)
 
   " Install new autocmds
   autocmd! User TermDebugStopPre call s:DebugStopPre()
-  exe "autocmd! User TermDebugRunPost call s:DebugRunPost(" . string(a:args) . ")"
+  autocmd! User TermDebugRunPost call s:DebugRunPost()
 
   " Open GDB
   if has_key(a:args, "ssh")
@@ -1112,22 +1119,29 @@ function! s:DebugStartPost(args)
   
   if has_key(a:args, "proc")
     call TermDebugSendCommand("attach " . a:args["proc"])
+    if has_key(a:args, "br")
+      call TermDebugSendCommand("br " . a:args['br'])
+      call TermDebugSendCommand("c")
+    endif
   elseif has_key(a:args, "exe")
     let cmdArgs = split(a:args["exe"], " ")
     call TermDebugSendCommand("file " . cmdArgs[0])
     if len(cmdArgs) > 1
       call TermDebugSendCommand("set args " . join(cmdArgs[1:], " "))
     endif
-    call TermDebugSendCommand("start")
+    if has_key(a:args, "br")
+      call TermDebugSendCommand("br " . a:args['br'])
+      call TermDebugSendCommand("r")
+    else
+      call TermDebugSendCommand("start")
+    endif
+  elseif has_key(a:args, "headless") && a:args['headless']
+    " NO-OP
   endif
 endfunction
 
-function! s:DebugRunPost(args)
-  call TermDebugSendCommand("set scheduler-locking step")
-  let cmds = get(a:args, "cmds", [])
-  for cmd in cmds
-    call TermDebugSendCommand(cmd)
-  endfor
+function! s:DebugRunPost()
+  " PASS
 endfunction
 
 function! s:DebugStopPre()
@@ -1273,6 +1287,25 @@ endfunction
 
 command! -nargs=? -complete=customlist,SourceCompl Source call s:GetSource()->ArgFilter(<q-args>)->DropInQf('Source')
 
+function! s:GetHeader()
+  let dir = FugitiveWorkTree()
+  if !isdirectory(dir)
+    return []
+  endif
+  let header = ["h", "hh", "H", "hp", "hxx", "hpp", "HPP", "h++", "tcc"]
+  let regex = '.*\.\(' . join(header, '\|') . '\)'
+  return Find(dir, "-regex", regex)
+endfunction
+
+function! Header(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  return s:GetHeader()->TailItems(a:ArgLead)
+endfunction
+
+command! -nargs=? -complete=customlist,Header Header call s:GetHeader()->ArgFilter(<q-args>)->DropInQf('Header')
+
 function! s:GetWorkFiles()
   let dir = FugitiveWorkTree()
   if !isdirectory(dir)
@@ -1385,13 +1418,10 @@ function! s:RemoteStart(host, exe)
 endfunction
 
 function! s:RemoteRun(host, exe)
-  let debug_args = #{ssh: a:host}
+  let debug_args = #{ssh: a:host, br: s:GetDebugLoc()}
   if !empty(a:exe)
     let debug_args['exe'] = a:exe
   endif
-  let br_cmd = 'br ' . s:GetDebugLoc()
-  let run_cmd = 'c'
-  let debug_args['cmds'] = [br_cmd, run_cmd]
   call s:Debug(debug_args)
 endfunction
 
@@ -1424,7 +1454,6 @@ endfunction
 function! s:Sshfs(remote, args)
   silent exe "tabnew scp://" . a:remote . "/" . a:args
 endfunction
-
 "}}}
 
 " Context dependent
@@ -1450,6 +1479,9 @@ function s:ObsidianMake(...)
   let common_flags = join([
         \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/", s:sdk_dir),
         \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/aarch64-aisys-linux", s:sdk_dir),
+        \ printf("-I %s/sysroots/armv8a-aisys-linux/usr/include/liveMedia", s:sdk_dir),
+        \ printf("-I %s/sysroots/armv8a-aisys-linux/usr/include/groupsock", s:sdk_dir),
+        \ printf("-I %s/sysroots/armv8a-aisys-linux/usr/include/UsageEnvironment", s:sdk_dir),
         \ "-O0 -ggdb -U_FORTIFY_SOURCE"])
   let cxxflags = "export CXXFLAGS=" . string(common_flags)
   let cflags = "export CFLAGS=" . string(common_flags)
@@ -1484,9 +1516,21 @@ function! s:ResolveEnvFile()
   if stridx(fname, "include/alcatraz") >= 0
     let idx = stridx(fname, "include/alcatraz")
     let resolved = "/home/stef/libalcatraz/" . fname[idx:]
-  elseif stridx(fname, "include/rockchip")
+  elseif stridx(fname, "include/rockchip") >= 0
     let basename = fnamemodify(fname, ":t")
     let resolved = "/home/stef/mpp/inc/" . basename
+  elseif stridx(fname, "include/liveMedia") >= 0
+    let part = matchlist(fname, 'include/liveMedia/\(.*\)')[1]
+    let resolved = "/home/stef/live/liveMedia/include/" . part
+  elseif stridx(fname, "include/UsageEnvironment") >= 0
+    let part = matchlist(fname, 'include/UsageEnvironment/\(.*\)')[1]
+    let resolved = "/home/stef/live/UsageEnvironment/include/" . part
+  elseif stridx(fname, "include/BasicUsageEnvironment") >= 0
+    let part = matchlist(fname, 'include/BasicUsageEnvironment/\(.*\)')[1]
+    let resolved = "/home/stef/live/BasicUsageEnvironment/include/" . part
+  elseif stridx(fname, "include/groupsock") >= 0
+    let part = matchlist(fname, 'include/groupsock/\(.*\)')[1]
+    let resolved = "/home/stef/live/groupsock/include/" . part
   endif
 
   if filereadable(resolved)
@@ -1494,7 +1538,7 @@ function! s:ResolveEnvFile()
     exe "edit " . resolved
     call winrestview(view)
   else
-    echo "Sorry, I'm buggy, Update me!"
+    echo "Sorry, I'm buggy, Update me! Resolved to: " . resolved
   endif
 endfunction
 
@@ -1562,16 +1606,30 @@ function! s:RemoteSync(arg, ...)
   endif
   const remote_dir = s:host . ":/var/tmp/"
 
+  let cmd = ["rsync", "-rlt"]
+
+  const fast_sync = v:true
+  if fast_sync
+    " Include all directories
+    call add(cmd, '--include=*/')
+    " Include all executables
+    let exes = systemlist(["find", dir, "-type", "f", "-executable", "-printf", "%P\n"])
+    for exe in exes
+      " throw exe
+      call add(cmd, '--include=' . exe)
+    endfor
+    " Exclude rest. XXX: ORDER OF FLAGS MATTERS!
+    call add(cmd, '--exclude=*')
+  endif
+
   let bang = get(a:000, 0, "")
   if empty(bang)
-    let cmd = ["rsync", "-rlt", "--info=progress2", dir, remote_dir]
-    let opts = #{on_stdout: funcref("OnStdout"), on_exit: funcref("OnExit")}
-    return jobstart(cmd, opts)
+    call extend(cmd, ["--info=progress2", dir, remote_dir])
+    return jobstart(cmd, #{on_stdout: funcref("OnStdout"), on_exit: funcref("OnExit")})
   else
     bot new
-    let cmd = ["rsync", "-rlt", "--info=all4", dir, remote_dir]
-    let opts = #{on_exit: funcref("OnExit")}
-    let id = termopen(cmd, opts)
+    call extend(cmd, ["--info=all4", dir, remote_dir])
+    let id = termopen(cmd, #{on_exit: funcref("OnExit")})
     call cursor("$", 1)
     return id
   endif
@@ -1583,34 +1641,55 @@ function! s:Resync()
   call s:ObsidianMake()
 endfunction
 
-command! -nargs=0 Resync call s:Resync()
+function s:MakeNiceApp(exe)
+  let dst = "/tmp/" .. fnamemodify(a:exe, ":t")
+  let cmd = printf("cp %s %s && setcap cap_sys_nice+ep %s", a:exe, dst, dst)
+  let msg = systemlist(["ssh", s:host, cmd])
+  if v:shell_error
+    bot new
+    setlocal buftype=nofile
+    call setline(1, msg[0])
+    call append(1, msg[1:])
+    throw "Failed to prepare " . a:exe
+  endif
+  return dst
+endfunction
 
 function! s:PrepareApp(exe)
   if a:exe =~ "obsidian-video$"
-    let cmd = printf("cp %s /tmp/obsidian-video; setcap cap_sys_nice+ep /tmp/obsidian-video", a:exe)
-    let job_id = jobstart(["ssh", s:host, cmd])
-    call jobwait([job_id])
-    return #{exe: "/tmp/obsidian-video", ssh: s:host, user: "rock-video"}
+    let nice_exe = s:MakeNiceApp(a:exe)
+    return #{exe: nice_exe, ssh: s:host, user: "rock-video"}
   elseif a:exe =~ "rtsp-server$"
-    let cmd = printf("cp %s /tmp/rtsp-server; setcap cap_sys_nice+ep /tmp/rtsp-server", a:exe)
-    let id = jobstart(["ssh", s:host, cmd])
-    call jobwait([id])
-    return #{exe: "/tmp/rtsp-server", ssh: s:host, user: "rtsp-server"}
+    let nice_exe = s:MakeNiceApp(a:exe)
+    return #{exe: nice_exe, ssh: s:host, user: "rtsp-server"}
+  elseif a:exe =~ "badge_and_face$"
+    let nice_exe = s:MakeNiceApp(a:exe)
+    return #{exe: nice_exe, ssh: s:host, user: "badge_and_face"}
+  elseif !empty(a:exe)
+    return #{exe: a:exe, ssh: s:host}
+  else
+    return #{headless: v:true, ssh: s:host}
   endif
-  return #{exe: a:exe, ssh: s:host}
 endfunction
 
 function! s:DebugApp(exe, run)
   let opts = s:PrepareApp(a:exe)
   if a:run
-    let br = 'br ' . s:GetDebugLoc()
-    let run = 'c'
-    let opts['cmds'] = [br, run]
+    let opts['br'] = s:GetDebugLoc()
   endif
   call s:Debug(opts)
 endfunction
 
 function s:ChangeHost(host, check)
+  if empty(a:host) || a:host == 'localhost'
+    command! -nargs=? -complete=customlist,ExeCompl Start call s:StartDebug(<q-args>)
+    command! -nargs=? -complete=customlist,ExeCompl Run call s:RunDebug(<q-args>)
+    command! -nargs=1 -complete=customlist,AttachCompl Attach call s:AttachDebug(<q-args>)
+    silent! delcommand Sshfs
+    silent! unlet s:host
+    return
+  endif
+
   if a:check
     call system(["ssh", "-o", "ConnectTimeout=1", a:host, "exit"])
     if v:shell_error != 0
@@ -1625,24 +1704,18 @@ function s:ChangeHost(host, check)
   exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs call <SID>Sshfs('%s', <q-args>)", s:host)
 endfunction
 
-command! -nargs=1 -complete=customlist,ChangeHostCompl Host call s:ChangeHost(<q-args>, 1)
+command! -nargs=? -complete=customlist,ChangeHostCompl Host call s:ChangeHost(<q-args>, 1)
 
 function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return ['p10', 'broken_rgb']
+  return ['p10', 'broken_rgb', 'miro_camera']
 endfunction
 
-call s:ChangeHost('broken_rgb', 0)
+call s:ChangeHost('p10', 0)
 
-function! s:StopServices(bang)
-  function! s:ExitHandler(id, code, event)
-    if a:code != 0
-      echo "Stopping of services failed"
-    endif
-  endfunction
-
+function! s:StopServices()
   let cmds = []
   let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service", "obsidian-video"]
   for service in stop_list
@@ -1650,32 +1723,27 @@ function! s:StopServices(bang)
     call add(cmds, cmd)
   endfor
 
-  let job_args = ["ssh", s:host, join(cmds, ";")]
-  let job_opts = #{on_exit: function('s:ExitHandler')}
-  if a:bang
+  let msg = systemlist(["ssh", s:host, join(cmds, ";")])
+  if v:shell_error
     bot new
-    let id = termopen(job_args, job_opts)
-  else
-    let id = jobstart(job_args, job_opts)
+    setlocal buftype=nofile
+    call setline(1, msg[0])
+    call append(1, msg[1:])
+    throw "Failed to stop services"
   endif
-  call jobwait([id])
 endfunction
 
-function! s:PrepareVideo()
-  call s:StopServices(v:false)
-  let opts = s:PrepareApp("/var/tmp/Debug/application/obsidian-video")
+function! s:ToClipboardApp(app)
+  call s:StopServices()
+  let opts = s:PrepareApp(a:app)
   let @+ = printf("sudo -u %s %s", opts['user'], opts['exe'])
+  echom "Copied command to clipboard!"
 endfunction
 
-function! s:PrepareStream()
-  call s:StopServices(v:false)
-  let opts = s:PrepareApp("/var/tmp/Debug/application/rtsp-server")
-  let @+ = printf("sudo -u %s %s", opts['user'], opts['exe'])
-endfunction
-
-nnoremap <silent> <leader>re <cmd>Resync<CR>
-nnoremap <silent> <leader>rv <cmd>call <SID>PrepareVideo()<CR>
-nnoremap <silent> <leader>rs <cmd>call <SID>PrepareStream()<CR>
+nnoremap <silent> <leader>re <cmd>call <SID>Resync()<CR>
+nnoremap <silent> <leader>rv <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/application/obsidian-video")<CR>
+nnoremap <silent> <leader>rs <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/application/rtsp-server")<CR>
+nnoremap <silent> <leader>rb <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/bin/badge_and_face")<CR>
 "}}}
 
 """"""""""""""""""""""""""""Testing"""""""""""""""""""""""""""" {{{
