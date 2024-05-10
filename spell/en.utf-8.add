@@ -42,3 +42,5 @@ doxygen
 mutex
 struct
 linux
+alcatraz
+sharefd

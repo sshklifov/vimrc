@@ -33,10 +33,16 @@ autocmd BufWritePost /home/$USER/.config/nvim/init.vim source ~/.config/nvim/ini
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 " sshklifov/debug
-let g:termdebug_ignore_no_such = 1
-let g:termdebug_override_s_and_n = 1
-let g:termdebug_override_up_and_down = 1
-let g:termdebug_override_finish_and_return = 1
+let g:promptdebug_show_source = 1
+let g:promptdebug_floating_output = 1
+
+let g:promptdebug_override_p = 1
+let g:promptdebug_override_s_and_n = 1
+let g:promptdebug_override_f_and_bt = 1
+let g:promptdebug_override_up_and_down = 1
+let g:promptdebug_override_finish_and_return = 1
+let g:promptdebug_override_t = 1
+
 
 " Tabulous
 let tabulousLabelLeftStr = ' ['
@@ -103,7 +109,7 @@ set diffopt+=vertical
 " Open vimrc quick (muy importante)
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
 nnoremap <silent> <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
-nnoremap <silent> <leader>dv :e ~/.local/share/nvim/plugged/debug/plugin/termdebug.vim<CR>
+nnoremap <silent> <leader>dv :e ~/.local/share/nvim/plugged/debug/plugin/promptdebug.vim<CR>
 
 " Indentation settings
 set expandtab
@@ -705,6 +711,20 @@ endfunction
 
 command! -nargs=? -bang -complete=customlist,OriginCompl Review call <SID>Review("<bang>", <q-args>)
 
+function s:SwitchToMainline()
+  try
+    let head = s:HeadOrThrow()
+    let mainline = s:MasterOrThrow()
+    let bpoint = s:CommonParentOrThrow(head, mainline)
+    call s:SwitchToBranch(bpoint)
+  catch
+    echo v:exception
+    return ''
+  endtry
+endfunction
+
+command! -nargs=0 Main call s:SwitchToMainline()
+
 function! s:ReviewCompleteFiles(cmd_bang, arg) abort
   if !exists("g:review_stack")
     echo "Start a review first"
@@ -982,6 +1002,19 @@ omap az <cmd>call <SID>FoldMotion()<CR>
 
 """"""""""""""""""""""""""""Debugging"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function! PrettyPrinterFilesystem(expr)
+  let path_expr = printf('%s._M_pathname._M_dataplus._M_p', a:expr)
+  return [[0, 'pathname', path_expr]]
+endfunction
+
+function! PrettyPrinterFormat(expr)
+  let pix = a:expr .. ".format.fmt.pix"
+  let width = pix .. ".width"
+  let height = pix .. ".height"
+  let fmt = pix .. ".pixelformat"
+  return [[0, "width", width], [0, "height", height], [0, "format", fmt]]
+endfunction
+
 function! s:StartDebug(exe)
   let exe = empty(a:exe) ? "a.out" : a:exe
   let opts = {"exe": exe}
@@ -1059,24 +1092,24 @@ function! s:Debug(args)
     return
   endif
 
-  if TermDebugIsOpen()
+  if PromptDebugIsOpen()
     echoerr 'Terminal debugger already running, cannot run two'
     return
   endif
 
   " Install new autocmds
-  autocmd! User TermDebugStopPre call s:DebugStopPre()
-  autocmd! User TermDebugRunPost call s:DebugRunPost()
+  autocmd! User PromptDebugStopPre call s:DebugStopPre()
+  autocmd! User PromptDebugRunPost call s:DebugRunPost()
 
   " Open GDB
   if has_key(a:args, "ssh")
     if has_key(a:args, "user")
-      call TermDebugStart(a:args["ssh"], a:args["user"])
+      call PromptDebugStart(a:args["ssh"], a:args["user"])
     else
-      call TermDebugStart(a:args["ssh"])
+      call PromptDebugStart(a:args["ssh"])
     endif
   else
-    call TermDebugStart()
+    call PromptDebugStart()
   endif
 
   " Run configurations
@@ -1086,54 +1119,58 @@ endfunction
 function! s:DebugStartPost(args)
   let quick_load = has_key(a:args, "symbols") && !a:args["symbols"]
 
-  command! -nargs=0 Capture call TermDebugGoToCapture()
-  command! -nargs=0 Gdb call TermDebugGoToGdb()
-  command! -nargs=0 Pwd call TermDebugShowPwd()
-  command! -nargs=0 Backtrace call TermDebugBacktrace()
-  command! -nargs=? Threads call TermDebugThreadInfo(<q-args>)
-  command! -nargs=0 DebugSym call TermDebugFindSym(expand('<cword>'))
-  command! -nargs=? Break call TermDebugGoToBreakpoint(<q-args>)
-  command! -nargs=? Commands call TermDebugEditCommands(<f-args>)
+  command! -nargs=0 Capture call PromptDebugGoToCapture()
+  command! -nargs=0 Gdb call PromptDebugGoToGdb()
+  command! -nargs=0 Pwd call PromptDebugShowPwd()
+  command! -nargs=0 DebugSym call PromptDebugFindSym(expand('<cword>'))
+  command! -nargs=? Break call PromptDebugGoToBreakpoint(<q-args>)
+  command! -nargs=? Commands call PromptDebugEditCommands(<f-args>)
 
-  nnoremap <silent> <leader>v <cmd>call TermDebugEvaluate(expand('<cword>'))<CR>
-  vnoremap <silent> <leader>v :<C-u>call TermDebugEvaluate(<SID>GetRangeExpr())<CR>
+  nnoremap <silent> <leader>v <cmd>call PromptDebugEvaluate(expand('<cword>'))<CR>
+  vnoremap <silent> <leader>v :<C-u>call PromptDebugEvaluate(<SID>GetRangeExpr())<CR>
 
-  nnoremap <silent> <leader>br :call TermDebugSendCommand("br " . <SID>GetDebugLoc())<CR>
-  nnoremap <silent> <leader>tbr :call TermDebugSendCommand("tbr " . <SID>GetDebugLoc())<CR>
-  nnoremap <silent> <leader>unt :call TermDebugSendCommands("tbr " . <SID>GetDebugLoc(), "c")<CR>
-  nnoremap <silent> <leader>pc :call TermDebugGoToPC()<CR>
+  nnoremap <silent> <leader>br :call PromptDebugSendCommand("br " . <SID>GetDebugLoc())<CR>
+  nnoremap <silent> <leader>tbr :call PromptDebugSendCommand("tbr " . <SID>GetDebugLoc())<CR>
+  nnoremap <silent> <leader>unt :call PromptDebugSendCommands("tbr " . <SID>GetDebugLoc(), "c")<CR>
+  nnoremap <silent> <leader>pc :call PromptDebugGoToPC()<CR>
 
-  call TermDebugSendCommand("set debug-file-directory /dev/null")
-  call TermDebugSendCommand("set print asm-demangle on")
-  call TermDebugSendCommand("set print pretty on")
-  call TermDebugSendCommand("set print frame-arguments none")
-  call TermDebugSendCommand("set print raw-frame-arguments off")
-  call TermDebugSendCommand("set print entry-values no")
-  call TermDebugSendCommand("set print inferior-events off")
-  call TermDebugSendCommand("set print thread-events off")
-  call TermDebugSendCommand("set print object on")
-  call TermDebugSendCommand("set breakpoint pending on")
+  call PromptDebugSendCommand("set debug-file-directory /dev/null")
+  call PromptDebugSendCommand("set print asm-demangle on")
+  call PromptDebugSendCommand("set print pretty on")
+  call PromptDebugSendCommand("set print frame-arguments none")
+  call PromptDebugSendCommand("set print raw-frame-arguments off")
+  call PromptDebugSendCommand("set print entry-values no")
+  call PromptDebugSendCommand("set print inferior-events off")
+  call PromptDebugSendCommand("set print thread-events off")
+  call PromptDebugSendCommand("set print object on")
+  call PromptDebugSendCommand("set breakpoint pending on")
+  call PromptDebugSendCommand("skip -rfu ^std::")
+  call PromptDebugSendCommand("skip -rfu ^cv::")
   if quick_load
-    call TermDebugSendCommand("set auto-solib-add off")
+    call PromptDebugSendCommand("set auto-solib-add off")
   endif
-  
+
+  " Custom pretty printers
+  call PromptDebugPrettyPrinter('std::filesystem', "PrettyPrinterFilesystem")
+  call PromptDebugPrettyPrinter('v4l2::Format$', "PrettyPrinterFormat")
+
   if has_key(a:args, "proc")
-    call TermDebugSendCommand("attach " . a:args["proc"])
+    call PromptDebugSendCommand("attach " . a:args["proc"])
     if has_key(a:args, "br")
-      call TermDebugSendCommand("br " . a:args['br'])
-      call TermDebugSendCommand("c")
+      call PromptDebugSendCommand("br " . a:args['br'])
+      call PromptDebugSendCommand("c")
     endif
   elseif has_key(a:args, "exe")
     let cmdArgs = split(a:args["exe"], " ")
-    call TermDebugSendCommand("file " . cmdArgs[0])
+    call PromptDebugSendCommand("file " . cmdArgs[0])
     if len(cmdArgs) > 1
-      call TermDebugSendCommand("set args " . join(cmdArgs[1:], " "))
+      call PromptDebugSendCommand("set args " . join(cmdArgs[1:], " "))
     endif
     if has_key(a:args, "br")
-      call TermDebugSendCommand("br " . a:args['br'])
-      call TermDebugSendCommand("r")
+      call PromptDebugSendCommand("br " . a:args['br'])
+      call PromptDebugSendCommand("r")
     else
-      call TermDebugSendCommand("start")
+      call PromptDebugSendCommand("start")
     endif
   elseif has_key(a:args, "headless") && a:args['headless']
     " NO-OP
@@ -1721,7 +1758,7 @@ endif
 
 function! s:StopServices()
   let cmds = []
-  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service", "obsidian-video"]
+  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service", "obsidian-video", "badge-and-face"]
   for service in stop_list
     let cmd = "systemctl stop " . service
     call add(cmds, cmd)
