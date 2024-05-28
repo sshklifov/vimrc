@@ -42,6 +42,7 @@ let g:promptdebug_override_f_and_bt = 1
 let g:promptdebug_override_up_and_down = 1
 let g:promptdebug_override_finish_and_return = 1
 let g:promptdebug_override_t = 1
+let g:promptdebug_override_info = 1
 
 
 " Tabulous
@@ -998,6 +999,47 @@ function! s:FoldMotion()
 endfunction
 
 omap az <cmd>call <SID>FoldMotion()<CR>
+
+function! SearchOrStay(pat, flags)
+  if getline('.') !~ a:pat
+    call search(a:pat, a:flags)
+  endif
+endfunction
+
+function! s:OursOrTheirs()
+  if getline('.') =~ '=\{7\}'
+    echo "Choose context to resolve!"
+    return
+  endif
+  call SearchOrStay('[<=>]\{7}', 'bW')
+
+  if getline('.') =~ '<\{7}'
+    delete
+    call SearchOrStay('=\{7}', 'W')
+    let firstline = line('.')
+    call SearchOrStay('>\{7}', 'W')
+    let lastline = line('.')
+    exe printf("%d,%ddelete", firstline, lastline)
+  elseif getline('.') =~ '=\{7}'
+    let lastline = line('.')
+    call SearchOrStay('<\{7}', 'bW')
+    let firstline = line('.')
+    exe printf("%d,%ddelete", firstline, lastline)
+    call SearchOrStay('>\{7}', 'W')
+    delete
+  elseif getline('.') =~ '>\{7}'
+    delete
+    call SearchOrStay('=\{7}', 'bW')
+    let lastline = line('.')
+    call SearchOrStay('<\{7}', 'bW')
+    let firstline = line('.')
+    exe printf("%d,%ddelete", firstline, lastline)
+  else
+    echo "Not inside a conflict"
+  endif
+endfunction
+
+command! -nargs=0 Resolve call s:OursOrTheirs()
 "}}}
 
 """"""""""""""""""""""""""""Debugging"""""""""""""""""""""""""""" {{{
@@ -1178,7 +1220,7 @@ function! s:DebugStartPost(args)
 endfunction
 
 function! s:DebugRunPost()
-  " PASS
+  call PromptDebugSendCommand("set scheduler-locking step")
 endfunction
 
 function! s:DebugStopPre()
@@ -1516,9 +1558,6 @@ function s:ObsidianMake(...)
   let common_flags = join([
         \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/", s:sdk_dir),
         \ printf("-isystem %s/sysroots/armv8a-aisys-linux/usr/include/c++/11.4.0/aarch64-aisys-linux", s:sdk_dir),
-        \ printf("-I %s/sysroots/armv8a-aisys-linux/usr/include/liveMedia", s:sdk_dir),
-        \ printf("-I %s/sysroots/armv8a-aisys-linux/usr/include/groupsock", s:sdk_dir),
-        \ printf("-I %s/sysroots/armv8a-aisys-linux/usr/include/UsageEnvironment", s:sdk_dir),
         \ "-O0 -ggdb -U_FORTIFY_SOURCE"])
   let cxxflags = "export CXXFLAGS=" . string(common_flags)
   let cflags = "export CFLAGS=" . string(common_flags)
@@ -1777,8 +1816,9 @@ endfunction
 function! s:ToClipboardApp(app)
   call s:StopServices()
   let opts = s:PrepareApp(a:app)
-  let @+ = printf("sudo -u %s %s", opts['user'], opts['exe'])
-  echom "Copied command to clipboard!"
+  let cmd = printf("sudo -u %s %s", opts['user'], opts['exe'])
+  let @+ = cmd
+  echom printf("Copied to clipboard: '%s'.", cmd)
 endfunction
 
 nnoremap <silent> <leader>re <cmd>call <SID>Resync()<CR>
