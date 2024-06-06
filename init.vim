@@ -33,17 +33,7 @@ autocmd BufWritePost /home/$USER/.config/nvim/init.vim source ~/.config/nvim/ini
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 " sshklifov/debug
-let g:promptdebug_show_source = 1
-let g:promptdebug_floating_output = 1
-
-let g:promptdebug_override_p = 1
-let g:promptdebug_override_s_and_n = 1
-let g:promptdebug_override_f_and_bt = 1
-let g:promptdebug_override_up_and_down = 1
-let g:promptdebug_override_finish_and_return = 1
-let g:promptdebug_override_t = 1
-let g:promptdebug_override_info = 1
-
+let g:promptdebug_commands = 0
 
 " Tabulous
 let tabulousLabelLeftStr = ' ['
@@ -622,7 +612,9 @@ endfunction
 
 function! s:MasterOrThrow()
   let branches = s:GetRefs(['refs/remotes'], 'ma')
-  if index(branches, 'origin/master') >= 0
+  if index(branches, 'origin/obsidian-master') >= 0
+    return 'origin/obsidian-master'
+  elseif index(branches, 'origin/master') >= 0
     return 'origin/master'
   elseif index(branches, 'origin/main') >= 0
     return 'origin/main'
@@ -647,6 +639,10 @@ function! s:CommonParentOrThrow(branch, main)
     throw "Revision range failed"
   endif
   let branch_first = dict['stdout'][-1]
+  if empty(branch_first)
+    " 'branch' and 'main' are the same commits
+    return a:main
+  endif
   " Go 1 back to find the common commit
   let dict = FugitiveExecute(["rev-parse", branch_first . "~1"])
   if dict['exit_status'] != 0
@@ -668,7 +664,7 @@ function! s:InsideGitOrThrow()
   endif
 endfunction
 
-function! s:TryReview(bang, arg)
+function! s:TryReview(arg)
   " Refresh current state of review
   if exists("g:review_stack")
     let items = g:review_stack[-1]
@@ -679,14 +675,9 @@ function! s:TryReview(bang, arg)
   call s:InsideGitOrThrow()
   " Determine main branch
   let head = s:HeadOrThrow()
-  if a:bang == "!"
-    let bpoint = empty(a:arg) ? head : a:arg
-    call s:RefExistsOrThrow(bpoint)
-  else
-    let mainline = empty(a:arg) ? s:MasterOrThrow() : a:arg
-    call s:RefExistsOrThrow(mainline)
-    let bpoint = s:CommonParentOrThrow(head, mainline)
-  endif
+  let mainline = empty(a:arg) ? s:MasterOrThrow() : a:arg
+  call s:RefExistsOrThrow(mainline)
+  let bpoint = s:CommonParentOrThrow(head, mainline)
   " Load files for review.
   " If possible, make the diff windows editable by not passing a ref to fugitive
   if bpoint == head
@@ -702,15 +693,15 @@ function! s:TryReview(bang, arg)
   let g:review_stack = [getqflist()]
 endfunction
 
-function s:Review(bang, arg)
+function s:Review(arg)
   try
-    call s:TryReview(a:bang, a:arg)
+    call s:TryReview(a:arg)
   catch
     echo v:exception
   endtry
 endfunction
 
-command! -nargs=? -bang -complete=customlist,OriginCompl Review call <SID>Review("<bang>", <q-args>)
+command! -nargs=? -complete=customlist,BranchCompl Review call <SID>Review(<q-args>)
 
 function s:SwitchToMainline()
   try
@@ -1140,7 +1131,7 @@ function! s:Debug(args)
   endif
 
   " Install new autocmds
-  autocmd! User PromptDebugStopPre call s:DebugStopPre()
+  autocmd! User PromptDebugStopPost call s:DebugStopPost()
   autocmd! User PromptDebugRunPost call s:DebugRunPost()
 
   " Open GDB
@@ -1223,7 +1214,7 @@ function! s:DebugRunPost()
   call PromptDebugSendCommand("set scheduler-locking step")
 endfunction
 
-function! s:DebugStopPre()
+function! s:DebugStopPost()
   silent! nunmap <leader>v
   silent! vunmap <leader>v
   silent! nunmap <leader>br
