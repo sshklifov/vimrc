@@ -116,8 +116,31 @@ cabbr Gb Git blame
 cabbr Gdt Git! difftool
 cabbr Gmt Git mergetool
 
-" Git commit style settings
-autocmd FileType gitcommit setlocal spell | setlocal tw=90 | setlocal cc=91
+function! s:BranchName()
+  let dict = FugitiveExecute(["branch", "--show-current"])
+  if dict['exit_status'] != 0
+    return ''
+  endif
+  return dict['stdout'][0]
+endfunction
+
+function! s:BranchIssueNumber()
+  let branch = s:BranchName()
+  return matchstr(branch, 'SW-[0-9]\{4\}')
+endfunction
+
+function! s:OnNewCommit()
+  setlocal spell
+  setlocal tw=90
+  setlocal cc=91
+  let issue = s:BranchIssueNumber()
+  if empty(getline(1)) && !empty(issue)
+    call setline(1, issue .. ': ')
+    startinsert!
+  endif
+endfunction
+
+autocmd FileType gitcommit call s:OnNewCommit()
 
 " Capture <Esc> in termal mode
 tnoremap <Esc> <C-\><C-n>
@@ -1820,34 +1843,6 @@ nnoremap <silent> <leader>rb <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/bin/b
 
 """"""""""""""""""""""""""""Testing"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-function! DecodeH264Packet()
-  call system(["ssh", "p10", "/var/tmp/Debug/test/mpi_dec_test -i /tmp/packet.h264 -o /tmp/packet.nv12 -w 1920 -h 1072 -f 0"])
-  if v:shell_error
-    echo "Decoding h264 packet failed!"
-    return
-  endif
-
-  call system(["ssh", "p10", "[ -s /tmp/packet.nv12 ]"])
-  if v:shell_error
-    echo "Empty nv12 frame!"
-    return
-  endif
-
-  call system(["scp", "p10:/tmp/packet.nv12", "/home/stef/Downloads"])
-  if v:shell_error
-    echo "Copy packet to machine failed!"
-    return
-  endif
-
-  call system("ffmpeg -y -f rawvideo -pix_fmt nv12 -s 1920x1072 -i /home/stef/Downloads/packet.nv12 -f image2 -pix_fmt rgb24 /home/stef/Downloads/packet.png")
-  if v:shell_error
-    echo "Converting nv12 packet to png failed!"
-    return
-  endif
-
-  echom "Done with Downloads/packet.png"
-endfunction
-
 function! s:HistFind(...)
   " XXX becuase of E464 this is ok
   let f_list = []
