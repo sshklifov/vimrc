@@ -582,21 +582,39 @@ inoremap {<CR> {<CR>}<C-o>O
 
 nmap <leader>sp :setlocal invspell<CR>
 
-function! s:SwitchToBranch(arg)
+function! s:WorkTreeCleanOrThrow()
   let dict = FugitiveExecute(["status", "--porcelain"])
   if dict['exit_status'] != 0
-    echo "Not inside repo"
-    return
+    throw "Not inside repo"
   endif
   if dict['stdout'][0] != ''
-    echo "Dirty repo detected"
-    return
+    throw "Work tree not clean"
   endif
+endfunction
+
+function! s:CheckedBranchOrThrow()
+  let dict = FugitiveExecute(["rev-parse", "--abbrev-ref", "HEAD"])
+  if dict['exit_status'] != 0
+    throw "Not inside repo"
+  endif
+  return dict['stdout'][0]
+endfunction
+
+function s:TryCall(what, ...)
+  let Partial = function(a:what, a:000)
+  try
+    call Partial()
+  catch
+    echo v:exception
+  endtry
+endfunction
+
+function! s:SwitchToBranch(arg)
+  call s:WorkTreeCleanOrThrow()
 
   let dict = FugitiveExecute(["checkout", a:arg])
   if dict['exit_status'] != 0
-    echo "Failed to checkout " . a:arg
-    return
+    throw "Failed to checkout " . a:arg
   endif
   " Rebuild for an up-to-date version of compile_commands.json
   exe "Make!"
@@ -614,7 +632,7 @@ function! s:GetRefs(ref_dirs, arg)
   return result
 endfunction
 
-command! -nargs=1 -complete=customlist,BranchCompl Branch call <SID>SwitchToBranch(<q-args>)
+command! -nargs=1 -complete=customlist,BranchCompl Branch call s:TryCall("s:SwitchToBranch", <q-args>)
 
 function! BranchCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -675,8 +693,8 @@ function! s:MasterOrThrow()
   endif
 endfunction
 
-function! s:HeadOrThrow()
-  let dict = FugitiveExecute(["rev-parse", "HEAD"])
+function! s:HashOrThrow(commitish)
+  let dict = FugitiveExecute(["rev-parse", a:commitish])
   if dict['exit_status'] != 0
     throw "Failed to parse HEAD"
   endif
@@ -716,7 +734,7 @@ function! s:InsideGitOrThrow()
   endif
 endfunction
 
-function! s:TryReview(arg)
+function! s:Review(arg)
   " Refresh current state of review
   if exists("g:review_stack")
     let items = g:review_stack[-1]
@@ -726,13 +744,13 @@ function! s:TryReview(arg)
 
   call s:InsideGitOrThrow()
   " Determine main branch
-  let head = s:HeadOrThrow()
+  let head = s:HashOrThrow("HEAD")
   let mainline = empty(a:arg) ? s:MasterOrThrow() : a:arg
   call s:RefExistsOrThrow(mainline)
   let bpoint = s:CommonParentOrThrow(head, mainline)
   " Load files for review.
   " If possible, make the diff windows editable by not passing a ref to fugitive
-  if bpoint == head
+  if get(a:, "arg", "") == "HEAD"
     exe "Git difftool --name-only"
     let bufs = map(getqflist(), "v:val.bufnr")
     call map(bufs, 'setbufvar(v:val, "commitish", "0")')
@@ -745,29 +763,7 @@ function! s:TryReview(arg)
   let g:review_stack = [getqflist()]
 endfunction
 
-function s:Review(arg)
-  try
-    call s:TryReview(a:arg)
-  catch
-    echo v:exception
-  endtry
-endfunction
-
-command! -nargs=? -complete=customlist,BranchCompl Review call <SID>Review(<q-args>)
-
-function s:SwitchToMainline()
-  try
-    let head = s:HeadOrThrow()
-    let mainline = s:MasterOrThrow()
-    let bpoint = s:CommonParentOrThrow(head, mainline)
-    call s:SwitchToBranch(bpoint)
-  catch
-    echo v:exception
-    return ''
-  endtry
-endfunction
-
-command! -nargs=0 Main call s:SwitchToMainline()
+command! -nargs=? -complete=customlist,BranchCompl Review call s:TryCall("s:Review", <q-args>)
 
 function! s:ReviewCompleteFiles(cmd_bang, arg) abort
   if !exists("g:review_stack")
@@ -854,8 +850,7 @@ endfunction
 command! -nargs=0 Uncomplete call <SID>UncompleteFiles()
 
 func s:OpenStackTrace()
-  let dirs = GetRepos()
-
+  let dirs = GetRepos(v:false)
   let lines = join(getline(1, '$'), "\n")
   let lines = split(lines, '\(^#\)\|\(\n#\)')
   let list = []
@@ -889,6 +884,7 @@ endfunc
 
 command! -nargs=0 Crashtrace call s:OpenStackTrace()
 " }}}
+
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
