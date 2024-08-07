@@ -227,10 +227,10 @@ function! GetFileStatusLine()
   if &ft == "help"
     return expand("%:t")
   endif
-  " Empty file -> Empty string
+  " Empty buffer -> Display path
   let filename = bufname()
   if empty(filename)
-    return ""
+    return getcwd() .. ">"
   endif
   " No file on disk -> Display buffer only
   if !filereadable(filename)
