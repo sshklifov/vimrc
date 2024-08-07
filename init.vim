@@ -633,6 +633,35 @@ function! OriginCompl(ArgLead, CmdLine, CursorPos)
   return s:GetRefs(['refs/remotes/origin'], a:ArgLead)
 endfunction
 
+function! RecentRefs(max_refs)
+  let max_refs = a:max_refs
+  if type(max_refs) == v:t_number
+    let max_refs = string(max_refs)
+  endif
+  let dict = FugitiveExecute(["reflog", "-n", max_refs, "--pretty=format:%H"])
+  if dict['exit_status'] != 0
+    return []
+  endif
+  let hashes = dict['stdout']
+  let dict = FugitiveExecute(["name-rev", "--annotate-stdin", "--name-only"], #{stdin: hashes})
+  if dict['exit_status'] != 0
+    return []
+  endif
+  let refs = dict['stdout']
+  call filter(refs, "!empty(v:val)")
+  return refs
+endfunction
+
+command -nargs=1 -complete=customlist,ReflogCompl Reflog call <SID>SwitchToBranch(<q-args>)
+
+function! ReflogCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  let refs = RecentRefs(10)
+  return filter(refs, "stridx(v:val, a:ArgLead) >= 0")
+endfunction
+
 function! s:MasterOrThrow()
   let branches = s:GetRefs(['refs/remotes'], 'ma')
   if index(branches, 'origin/obsidian-master') >= 0

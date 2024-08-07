@@ -2,6 +2,7 @@
 
 local lspconfig = require('lspconfig')
 local api = vim.api
+local uv = vim.uv
 
 -- Clangd extensions
 
@@ -15,7 +16,9 @@ local RequestBaseClass = function()
       vim.notify('No results')
     else
       local client = vim.lsp.get_client_by_id(ctx.client_id)
-      api.nvim_call_function("TypeHierarchyHandler", {res, client.offset_encoding})
+      if client then
+        api.nvim_call_function("TypeHierarchyHandler", {res, client.offset_encoding})
+      end
     end
   end
   vim.lsp.buf_request(0, 'textDocument/typeHierarchy', params, handler)
@@ -31,7 +34,9 @@ local RequestDerivedClass = function()
       vim.notify('No results')
     else
       local client = vim.lsp.get_client_by_id(ctx.client_id)
-      api.nvim_call_function("TypeHierarchyHandler", {res, client.offset_encoding})
+      if client then
+        api.nvim_call_function("TypeHierarchyHandler", {res, client.offset_encoding})
+      end
     end
   end
   vim.lsp.buf_request(0, 'textDocument/typeHierarchy', params, handler)
@@ -72,7 +77,7 @@ function ShowAutoCompletion(...)
     if err or not res or vim.tbl_isempty(res) then
       return
     end
-    local complete_items = vim.lsp.util.text_document_completion_list_to_complete_items(res, prefix)
+    local complete_items = vim.lsp._completion._lsp_to_complete_items(res, prefix)
     if vim.tbl_isempty(complete_items) then
       return
     end
@@ -101,7 +106,7 @@ end
 
 function GetAutoCompletion()
   local ns = api.nvim_create_namespace("autocomplete")
-  local extmarks = api.nvim_buf_get_extmarks(0, ns, 0, -1, {details = 1})
+  local extmarks = api.nvim_buf_get_extmarks(0, ns, 0, -1, {details = true})
   if not vim.tbl_isempty(extmarks) then
     local details = extmarks[1][4]
     local text = details.virt_text[1][1]
@@ -114,7 +119,6 @@ end
 
 local OnCclsAttach = function(_, bufnr)
   local function buf_set_keymap(...) api.nvim_buf_set_keymap(bufnr, ...) end
-  local function buf_set_option(...) api.nvim_buf_set_option(bufnr, ...) end
   local function user_command(...) api.nvim_buf_create_user_command(bufnr, ...) end
   local function autocmd(event, cb) api.nvim_create_autocmd({event}, {buffer=bufnr, callback = cb}) end
 
@@ -169,7 +173,7 @@ lspconfig.clangd.setup {
 
 local OnLuaInit = function(client)
   local path = client.workspace_folders[1].name
-  if vim.loop.fs_stat(path..'/.luarc.json') or vim.loop.fs_stat(path..'/.luarc.jsonc') then
+  if uv.fs_stat(path..'/.luarc.json') or uv.fs_stat(path..'/.luarc.jsonc') then
     return
   end
 
@@ -195,7 +199,7 @@ end
 
 local OnLuaAttach = function(_, bufnr)
   local function buf_set_keymap(...) api.nvim_buf_set_keymap(bufnr, ...) end
-  local function buf_set_option(...) api.nvim_buf_set_option(bufnr, ...) end
+  local function buf_set_option(name, value) api.nvim_set_option_value(name, value, {buf = bufnr}) end
 
   -- Enable completion triggered by <c-x><c-o>
   buf_set_option('omnifunc', 'v:lua.vim.lsp.omnifunc')
