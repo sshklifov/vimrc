@@ -161,11 +161,11 @@ command! -bang W w<bang>
 command! -bang Qa qa<bang>
 
 " Annoying quirks
+set updatecount=0
 set shortmess+=I
 au FileType * setlocal fo-=cro
 nnoremap <C-w>t <C-w>T
 let mapleader = "\\"
-autocmd SwapExists * let v:swapchoice = "e"
 
 " Increase oldfiles size
 set shada='1000,<0,s50,h
