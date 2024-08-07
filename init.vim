@@ -1903,5 +1903,138 @@ function! s:Rerun(...)
 endfunction
 "}}}
 
+""""""""""""""""""""""""""""AI distro"""""""""""""""""""""""""" {{{
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function! s:FetchAI()
+  let targets = [
+        \ ["~/libalcatraz", "master", "libalcatraz_git.bb"],
+        \ ["~/obsidian-video", "main", "obsidian-video_git.bb"],
+        \ ["~/badge-and-face", "obsidian-master", "badge-and-face-obsidian_git.bb"]]
+
+  echo "Fetching from origin..."
+
+  e ~/aidistro/repo
+  call s:WorkTreeCleanOrThrow()
+
+  let dict = FugitiveExecute(["checkout", "master"])
+  let dict = FugitiveExecute(["pull", "origin", "master"])
+  if dict['exit_status'] != 0
+    throw "Failed to pull aidistro"
+  endif
+
+  for [repo, branch, bitbake] in targets
+    " Find new hash
+    exe "e " .. repo
+    let dict = FugitiveExecute(["fetch", "origin", branch])
+    if dict['exit_status'] != 0
+      throw "Fetch in " .. repo .. " failed"
+    endif
+  endfor
+
+  echo "Fetching completed!"
+  for [repo, branch, bitbake] in targets
+    " Find new hash
+    exe "e " .. repo
+    let new_hash = s:HashOrThrow("origin/" .. branch)
+    " Find old hash
+    exe "Ol " .. bitbake
+    if search("SRCREV") == 0
+      throw "Failed to find bitbake file"
+    endif
+    normal 0f"vi"y
+    let old_hash = @0
+    " Compare and exchange
+    if new_hash != old_hash
+      exe printf("substitute /%s/%s/", old_hash, new_hash)
+      write
+    endif
+  endfor
+  " Display changes
+  e ~/aidistro/repo
+  G
+  exe "normal \<C-w>w"
+  quit
+endfunction
+
+function! s:CommitAI()
+  let targets = [
+        \ ["~/libalcatraz", "master", "libalcatraz_git.bb"],
+        \ ["~/obsidian-video", "main", "obsidian-video_git.bb"],
+        \ ["~/badge-and-face", "obsidian-master", "badge-and-face-obsidian_git.bb"]]
+
+  e ~/aidistro/repo
+  let dict = FugitiveExecute(["diff", "--name-only", "--cached"])
+  if dict['exit_status'] != 0 || dict['stdout'][0] == ''
+    throw "Cannot determine what changed in aidistro."
+  endif
+  let staged = dict['stdout']
+  for [repo, branch, bitbake] in reverse(targets)
+    let staged_bitbake = filter(copy(staged), 'stridx(v:val, bitbake) >= 0')
+    if empty(staged_bitbake)
+      continue
+    endif
+    " Get commit message. This is needed to create the branch and the commit
+    exe "e " .. repo
+    let dict = FugitiveExecute(["log", "-1", "--format=%B", "origin/" .. branch])
+    if dict['exit_status'] != 0
+      throw "Cannot determine commit message for " .. repo
+    endif
+    let msg = dict['stdout'][0]
+    let issue = matchstr(msg, 'SW-[0-9]\{4\}')
+    " Create branch
+    e ~/aidistro/repo
+    let ai_branch = "stef/" .. issue .. "/ai"
+    let dict = FugitiveExecute(["checkout", "-b", ai_branch])
+    if dict['exit_status'] != 0
+      throw "Failed to create branch " .. ai_branch
+    endif
+    let ai_msg = repo[2:] .. ": " .. msg
+    let dict = FugitiveExecute(["commit", "-m", ai_msg])
+    if dict['exit_status'] != 0
+      throw printf("Failed to commit changes with message '%s'", ai_msg)
+    endif
+    " Success
+    exe "Gdrop " .. ai_branch
+    return
+  endfor
+  throw "Unexpected failure, fixme!"
+endfunction
+
+function! s:PushAI()
+  e ~/aidistro/repo
+  let dict = FugitiveExecute(["push", "origin", "HEAD"])
+  if dict['exit_status'] != 0
+    throw "Failed to push branch to origin"
+  endif
+  let @+ = "https://gitlab.com/Rainbe/Firmware/aidistro/-/merge_requests"
+  echo "URL copied to clipboard!"
+endfunction
+
+function! s:FinishAI()
+  e ~/aidistro/repo
+  let branch = s:CheckedBranchOrThrow()
+  let dict = FugitiveExecute(["checkout", "master"])
+  if dict['exit_status'] != 0
+    throw "Failed to checkout master"
+  endif
+  " Not the end of the world if this fails.
+  call FugitiveExecute(["reset", "--hard"])
+  let dict = FugitiveExecute(["pull", "origin", "master"])
+  if dict['exit_status'] != 0
+    throw "Failed to pull new changes"
+  endif
+  let dict = FugitiveExecute(["branch", "-D", branch])
+  if dict['exit_status'] != 0
+    throw "Failed to delete newly created branch"
+  endif
+  echo "Finished!"
+endfunction
+
+command! -nargs=0 FetchAI call s:TryCall("s:FetchAI")
+command! -nargs=0 CommitAI call s:TryCall("s:CommitAI")
+command! -nargs=0 PushAI call s:TryCall("s:PushAI")
+command! -nargs=0 FinishAI call s:TryCall("s:FinishAI")
+" }}}
+
 " Go back to default autocommand group
 augroup END
