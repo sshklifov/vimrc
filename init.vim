@@ -392,6 +392,54 @@ function! WindowCompl(ArgLead, CmdLine, CursorPos)
   return s:GetWindows(a:ArgLead, 1)
 endfunction
 
+" CursorHold time
+set updatetime=500
+set completeopt=menuone,noinsert
+set pumheight=10
+
+" http://vim.wikia.com/wiki/Automatically_append_closing_characters
+inoremap {<CR> {<CR>}<C-o>O
+
+nmap <leader>sp :setlocal invspell<CR>
+
+func s:OpenStackTrace()
+  let dirs = GetRepos(v:false)
+  let lines = join(getline(1, '$'), "\n")
+  let lines = split(lines, '\(^#\)\|\(\n#\)')
+  let list = []
+  for line in lines
+    let m = matchlist(line, '^\([0-9]\+\).* at \([^:]\+\):\([0-9]\+\)')
+    if len(m) < 4
+      call add(list, #{text: '#'.line, valid: 0})
+    else
+      let level = m[1]
+      let file = m[2]
+      let line = m[3]
+      let resolved = v:false
+      for dir in dirs
+        let repo = fnamemodify(dir, ":t")
+        let resolved = substitute(file, "^.*" . repo, dir, "")
+        if filereadable(resolved)
+          call add(list, #{filename: resolved, lnum: line, text: level})
+          let resolved = v:true
+          break
+        endif
+      endfor
+      if !resolved
+        let text = printf("%s:%d", file, line)
+        call add(list, #{text: text, valid: 0})
+      endif
+    endif
+  endfor
+  call setqflist([], ' ', #{title: 'Stack', items: list})
+  copen
+endfunc
+
+command! -nargs=0 Crashtrace call s:OpenStackTrace()
+" }}}
+
+""""""""""""""""""""""""""""Git"""""""""""""""""""""""""""" {{{
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:DiffFugitiveWinid()
   " Load all windows in tab
   let winids = gettabinfo(tabpagenr())[0]["windows"]
@@ -537,11 +585,13 @@ function! s:GetUnstaged()
   if empty(files)
     return []
   endif
+  " Git reports these duplicated sometimes
+  call uniq(sort(files))
   return map(files, "FugitiveFind(v:val)")
 endfunction
 
-command! -nargs=? -complete=customlist,UnstagedCompl Unstaged
-      \ call s:GetUnstaged()->ArgFilter(<q-args>)->DropInQf("Unstaged")
+command! -nargs=? -complete=customlist,UnstagedCompl Dirty
+      \ call s:GetUnstaged()->FileFilter(<q-args>)->DropInQf("Unstaged")
 
 function UnstagedCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -563,7 +613,7 @@ function! s:GetUntracked()
 endfunction
 
 command! -nargs=? -complete=customlist,UntrackedCompl Untracked
-      \ call s:GetUntracked()->ArgFilter(<q-args>)->DropInQf("Untracked")
+      \ call s:GetUntracked()->FileFilter(<q-args>)->DropInQf("Untracked")
 
 function UntrackedCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -571,16 +621,6 @@ function UntrackedCompl(ArgLead, CmdLine, CursorPos)
   endif
   return s:GetUntracked(bang)->TailItems(a:ArgLead)
 endfunction
-
-" CursorHold time
-set updatetime=500
-set completeopt=menuone,noinsert
-set pumheight=10
-
-" http://vim.wikia.com/wiki/Automatically_append_closing_characters
-inoremap {<CR> {<CR>}<C-o>O
-
-nmap <leader>sp :setlocal invspell<CR>
 
 function! s:WorkTreeCleanOrThrow()
   let dict = FugitiveExecute(["status", "--porcelain"])
@@ -651,7 +691,7 @@ function! OriginCompl(ArgLead, CmdLine, CursorPos)
   return s:GetRefs(['refs/remotes/origin'], a:ArgLead)
 endfunction
 
-function! RecentRefs(max_refs)
+function! s:RecentRefs(max_refs)
   let max_refs = a:max_refs
   if type(max_refs) == v:t_number
     let max_refs = string(max_refs)
@@ -676,7 +716,7 @@ function! ReflogCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  let refs = RecentRefs(10)
+  let refs = s:RecentRefs(10)
   return filter(refs, "stridx(v:val, a:ArgLead) >= 0")
 endfunction
 
@@ -849,42 +889,7 @@ endfunction
 
 command! -nargs=0 Uncomplete call <SID>UncompleteFiles()
 
-func s:OpenStackTrace()
-  let dirs = GetRepos(v:false)
-  let lines = join(getline(1, '$'), "\n")
-  let lines = split(lines, '\(^#\)\|\(\n#\)')
-  let list = []
-  for line in lines
-    let m = matchlist(line, '^\([0-9]\+\).* at \([^:]\+\):\([0-9]\+\)')
-    if len(m) < 4
-      call add(list, #{text: '#'.line, valid: 0})
-    else
-      let level = m[1]
-      let file = m[2]
-      let line = m[3]
-      let resolved = v:false
-      for dir in dirs
-        let repo = fnamemodify(dir, ":t")
-        let resolved = substitute(file, "^.*" . repo, dir, "")
-        if filereadable(resolved)
-          call add(list, #{filename: resolved, lnum: line, text: level})
-          let resolved = v:true
-          break
-        endif
-      endfor
-      if !resolved
-        let text = printf("%s:%d", file, line)
-        call add(list, #{text: text, valid: 0})
-      endif
-    endif
-  endfor
-  call setqflist([], ' ', #{title: 'Stack', items: list})
-  copen
-endfunc
-
-command! -nargs=0 Crashtrace call s:OpenStackTrace()
 " }}}
-
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -1384,7 +1389,7 @@ function! IndexCompl(ArgLead, CmdLine, CursorPos)
   return s:GetIndex()->SplitItems(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,IndexCompl Index call s:GetIndex()->ArgFilter(<q-args>)->DropInQf('Index')
+command! -nargs=? -complete=customlist,IndexCompl Index call s:GetIndex()->FileFilter(<q-args>)->DropInQf('Index')
 
 function! s:GetSource()
   let dir = FugitiveWorkTree()
@@ -1403,7 +1408,7 @@ function! SourceCompl(ArgLead, CmdLine, CursorPos)
   return s:GetSource()->TailItems(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,SourceCompl Source call s:GetSource()->ArgFilter(<q-args>)->DropInQf('Source')
+command! -nargs=? -complete=customlist,SourceCompl Source call s:GetSource()->FileFilter(<q-args>)->DropInQf('Source')
 
 function! s:GetHeader()
   let dir = FugitiveWorkTree()
@@ -1422,7 +1427,7 @@ function! Header(ArgLead, CmdLine, CursorPos)
   return s:GetHeader()->TailItems(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,Header Header call s:GetHeader()->ArgFilter(<q-args>)->DropInQf('Header')
+command! -nargs=? -complete=customlist,Header Header call s:GetHeader()->FileFilter(<q-args>)->DropInQf('Header')
 
 function! s:GetWorkFiles()
   let dir = FugitiveWorkTree()
@@ -1439,7 +1444,7 @@ function! WorkFilesCompl(ArgLead, CmdLine, CursorPos)
   return s:GetWorkFiles()->SplitItems(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->ArgFilter(<q-args>)->DropInQf('Workfiles')
+command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->FileFilter(<q-args>)->DropInQf('Workfiles')
 
 function! TypeHierarchyHandler(res, encoding)
   let items = []
@@ -1771,7 +1776,10 @@ function s:MakeNiceApp(exe)
 endfunction
 
 function! s:PrepareApp(exe)
-  if a:exe =~ "obsidian-video$"
+  if a:exe =~ "mock_video$"
+    let nice_exe = s:MakeNiceApp(a:exe)
+    return #{exe: nice_exe, ssh: s:host, user: "rock-video"}
+  elseif a:exe =~ "obsidian-video$"
     let nice_exe = s:MakeNiceApp(a:exe)
     return #{exe: nice_exe, ssh: s:host, user: "rock-video"}
   elseif a:exe =~ "rtsp-server$"
@@ -1796,7 +1804,11 @@ function! s:DebugApp(exe, run)
 endfunction
 
 function s:ChangeHost(host, check)
-  if empty(a:host) || a:host == 'localhost'
+  if empty(a:host)
+    echo "Current host is: " .. s:host
+    return
+  endif
+  if a:host == 'localhost'
     command! -nargs=? -complete=customlist,ExeCompl Start call s:StartDebug(<q-args>)
     command! -nargs=? -complete=customlist,ExeCompl Run call s:RunDebug(<q-args>)
     command! -nargs=1 -complete=customlist,AttachCompl Attach call s:AttachDebug(<q-args>)
@@ -1825,7 +1837,8 @@ function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return ['p10', 'broken_rgb', 'miro_camera']
+  let compl = ['p10', 'broken_rgb', 'miro_camera', 'local_camera']
+  return filter(compl, "stridx(v:val, a:ArgLead) >= 0")
 endfunction
 
 if readfile("/etc/hostname") == ["npc"]
@@ -1834,7 +1847,7 @@ else
   call s:ChangeHost('localhost', v:false)
 endif
 
-function! s:StopServices()
+function! StopServices()
   let cmds = []
   let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service", "obsidian-video", "badge-and-face"]
   for service in stop_list
@@ -1850,10 +1863,31 @@ function! s:StopServices()
     call append(1, msg[1:])
     throw "Failed to stop services"
   endif
+  echo "Stopped."
+endfunction
+
+function! DropClients()
+  sp ~/obsidian-video
+  Source fd_transmitter
+  if search("DropTimeoutClients") == 0
+    echo "Failed to find drop call site"
+    return
+  endif
+endfunction
+
+function! UpdateSDK()
+  split
+  enew
+  let cmds = []
+  call add(cmds, printf("sudo cp -v ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s/sysroots/armv8a-aisys-linux/usr/lib/", s:sdk_dir))
+  call add(cmds, printf("sudo cp -v -r ~/libalcatraz/include/alcatraz/* %s/sysroots/armv8a-aisys-linux/usr/include/alcatraz/", s:sdk_dir))
+  call add(cmds, printf("scp ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s:/usr/lib", s:host))
+  call termopen(join(cmds, ";"))
+  startinsert
 endfunction
 
 function! s:ToClipboardApp(app)
-  call s:StopServices()
+  " call StopServices()
   let opts = s:PrepareApp(a:app)
   let cmd = printf("sudo -u %s %s", opts['user'], opts['exe'])
   let @+ = cmd
