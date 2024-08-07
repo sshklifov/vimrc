@@ -950,20 +950,24 @@ function! s:OpenSource()
   for ext in extensions
     let file = expand("%:r") . ext
     if filereadable(file)
-      exe "edit " . file
+      if bufnr() != bufnr(file)
+        exe "edit " . file
+      endif
       return
     endif
 
     let file = substitute(file, "include", "src", "")
     if filereadable(file)
-      exe "edit " . file
+      if bufnr() != bufnr(file)
+        exe "edit " . file
+      endif
       return
     endif
   endfor
 
   " Default to search in root of workspace
-  let regex = ".*" . expand("%:t:r") . "\\.c.*"
-  call QuickFind(FugitiveWorkTree(), "-regex", regex)
+  let glob = expand("%:t:r") . ".c*"
+  call QuickFind(FugitiveWorkTree(), "-iname", glob)
 endfunction
 
 function! s:OpenHeader()
@@ -971,20 +975,24 @@ function! s:OpenHeader()
   for ext in extensions
     let file = expand("%:r") . ext
     if filereadable(file)
-      exe "edit " . file
+      if bufnr() != bufnr(file)
+        exe "edit " . file
+      endif
       return
     endif
 
     let file = substitute(file, "src", "include", "")
     if filereadable(file)
-      exe "edit " . file
+      if bufnr() != bufnr(file)
+        exe "edit " . file
+      endif
       return
     endif
   endfor
 
   " Default to search in root of workspace
-  let regex = ".*" . expand("%:t:r") . "\\.h.*"
-  call QuickFind(FugitiveWorkTree(), "-regex", regex)
+  let glob = expand("%:t:r") . ".h*"
+  call QuickFind(FugitiveWorkTree(), "-iname", glob)
 endfunction
 
 nmap <silent> <leader>cpp :call <SID>OpenSource()<CR>
@@ -1237,8 +1245,8 @@ function! s:DebugStartPost(args)
   endif
 
   " Custom pretty printers
-  call PromptDebugPrettyPrinter('std::filesystem', "PrettyPrinterFilesystem")
-  call PromptDebugPrettyPrinter('v4l2::Format$', "PrettyPrinterFormat")
+  call PromptDebugPrettyPrinter(['std::filesystem'], "PrettyPrinterFilesystem")
+  call PromptDebugPrettyPrinter(['v4l2::Format'], "PrettyPrinterFormat")
 
   if has_key(a:args, "proc")
     call PromptDebugSendCommand("attach " . a:args["proc"])
@@ -1304,7 +1312,7 @@ endfunction
 """"""""""""""""""""""""""""LSP"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 command! -nargs=0 LspStop lua vim.lsp.stop_client(vim.lsp.get_active_clients())
-command! -nargs=0 LspProg lua print(vim.inspect(vim.lsp.util.get_progress_messages()))
+command! -nargs=0 LspProg lua print(vim.inspect(vim.lsp.status()))
 
 command! -nargs=0 -range=% For lua vim.lsp.buf.format{ range = {start= {<line1>, 0}, ["end"] = {<line2>, 0}} }
 
