@@ -25,6 +25,7 @@ if !isdirectory(printf("/home/%s/.local/share/nvim/plugged", $USER))
 endif
 
 let s:default_host = "p10"
+let s:host = "miro_camera"
 
 " Redefine the group, avoids having the same autocommands twice
 augroup VimStartup
@@ -301,10 +302,20 @@ function! BranchStatusLine()
   endif
   let res = substitute(res, "\\[Git(", "", "")
   let res = substitute(res, ")\\]", "", "")
-  return res . ">"
+  return res .. ">"
+endfunction
+
+function! HostStatusLine()
+  if s:host != s:default_host
+    return "((" .. s:host .. "))"
+   else
+     return ''
+   endif
 endfunction
 
 set statusline=
+set statusline+=
+set statusline+=%(%{HostStatusLine()}\ %)
 set statusline+=%(%{BranchStatusLine()}\ %)
 set statusline+=%(%{GetFileStatusLine()}\ %{GetProgressStatusLine()}%m%h%r%)
 set statusline+=%=
@@ -1854,7 +1865,7 @@ function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   return filter(hosts, "stridx(v:val, a:ArgLead) >= 0")
 endfunction
 
-call s:ChangeHost(s:default_host, v:false)
+call s:ChangeHost(s:host, v:false)
 
 function! StopServices()
   let stop_list = [
