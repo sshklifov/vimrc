@@ -24,6 +24,8 @@ if !isdirectory(printf("/home/%s/.local/share/nvim/plugged", $USER))
   finish
 endif
 
+let s:default_host = "p10"
+
 " Redefine the group, avoids having the same autocommands twice
 augroup VimStartup
 au!
@@ -716,7 +718,7 @@ function! ReflogCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  let refs = s:RecentRefs(10)
+  let refs = s:RecentRefs(20)
   return filter(refs, "stridx(v:val, a:ArgLead) >= 0")
 endfunction
 
@@ -1792,6 +1794,7 @@ function! s:PrepareApp(exe)
     return #{exe: nice_exe, ssh: s:host, user: "rock-video"}
   elseif a:exe =~ "rtsp-server$"
     let nice_exe = s:MakeNiceApp(a:exe)
+    let nice_exe ..= " --noauth"
     return #{exe: nice_exe, ssh: s:host, user: "rtsp-server"}
   elseif a:exe =~ "badge_and_face$"
     let nice_exe = s:MakeNiceApp(a:exe)
@@ -1845,19 +1848,24 @@ function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  let compl = ['p10', 'broken_rgb', 'miro_camera', 'local_camera']
-  return filter(compl, "stridx(v:val, a:ArgLead) >= 0")
+  let lines = readfile("/home/" .. $USER .. "/.ssh/config")
+  let matches = matchstrlist(lines, 'Host \(\i\+\)$', #{submatches: v:true})
+  let hosts = map(matches, "v:val.submatches[0]")
+  return filter(hosts, "stridx(v:val, a:ArgLead) >= 0")
 endfunction
 
-if readfile("/etc/hostname") == ["npc"]
-  call s:ChangeHost('p10', v:false)
-else
-  call s:ChangeHost('localhost', v:false)
-endif
+call s:ChangeHost(s:default_host, v:false)
 
 function! StopServices()
+  let stop_list = [
+        \ "rtsp-server-noauth",
+        \ "rtsp-server.socket",
+        \ "rtsp-server.service",
+        \ "obsidian-video",
+        \ "badge-and-face",
+        \ "qrcode-scanner"
+        \ ]
   let cmds = []
-  let stop_list = ["rtsp-server-noauth", "rtsp-server.socket", "rtsp-server.service", "obsidian-video", "badge-and-face"]
   for service in stop_list
     let cmd = "systemctl stop " . service
     call add(cmds, cmd)
