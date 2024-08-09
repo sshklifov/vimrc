@@ -1702,16 +1702,13 @@ function! SshfsCompl(ArgLead, CmdLine, CursorPos)
     return []
   endif
 
-  if empty(a:ArgLead) || a:ArgLead == '/'
-    return systemlist(["ssh", s:host, "find / -maxdepth 1"])
-  else
-    let dirname = fnamemodify(a:ArgLead, ':h')
-    let remote_dirs = systemlist(["ssh", s:host, "find " . dirname . " -maxdepth 1 -type d"])
-    let remote_dirs = map(remote_dirs, 'v:val . "/"')
-    let remote_files = systemlist(["ssh", s:host, "find " . dirname . " -maxdepth 1 -type f"])
-    let total = remote_dirs + remote_files
-    return filter(total, 'stridx(v:val, a:ArgLead) == 0')
-  endif
+  let dirname = empty(a:ArgLead) ? '/' : fnamemodify(a:ArgLead, ':h')
+  let remote_dirs = systemlist(["ssh", s:host, "find " . dirname . " -maxdepth 1 -type d"])
+  let remote_dirs = map(remote_dirs, 'v:val . "/"')
+  call filter(remote_dirs, 'v:val != "//"')
+  let remote_files = systemlist(["ssh", s:host, "find " . dirname . " -maxdepth 1 -type f"])
+  let total = remote_dirs + remote_files
+  return filter(total, 'stridx(v:val, a:ArgLead) == 0')
 endfunction
 
 function! s:RemoteSync(arg, ...)
