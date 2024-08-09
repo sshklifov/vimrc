@@ -517,11 +517,13 @@ function! s:ToggleDiff()
     quit
   elseif s:CanStartDiff()
     cclose
+    let was_winid = win_getid()
     if exists("b:commitish") && b:commitish != "0"
       exe "lefta Gdiffsplit " . b:commitish
     else
       exe "lefta Gdiffsplit"
     endif
+    call win_gotoid(was_winid)
   endif
 endfunction
 
@@ -817,6 +819,8 @@ function! s:Review(arg)
 endfunction
 
 command! -nargs=? -complete=customlist,BranchCompl Review call s:TryCall("s:Review", <q-args>)
+
+command! -nargs=0 D Review HEAD
 
 function! s:ReviewCompleteFiles(cmd_bang, arg) abort
   if !exists("g:review_stack")
