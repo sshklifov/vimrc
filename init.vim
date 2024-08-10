@@ -306,7 +306,7 @@ function! BranchStatusLine()
 endfunction
 
 function! HostStatusLine()
-  if s:host != s:default_host
+  if exists('s:host') && s:host != s:default_host
     return "((" .. s:host .. "))"
    else
      return ''
@@ -1396,26 +1396,6 @@ command! -nargs=+ -complete=customlist,FindCompl Find call QuickFind(<f-args>)
 
 command! -nargs=+ Grepo call QuickGrep(<q-args>, FugitiveWorkTree())
 
-function! s:GetIndex()
-  let dir = FugitiveWorkTree()
-  if !isdirectory(dir)
-    return []
-  endif
-  let source = ["c", "cc", "cp", "cxx", "cpp", "CPP", "c++", "C"]
-  let header = ["h", "hh", "H", "hp", "hxx", "hpp", "HPP", "h++", "tcc"]
-  let regex = '.*\.\(' . join(source, '\|') . '\|' . join(header, '\|') . '\)'
-  return Find(dir, "-regex", regex)
-endfunction
-
-function! IndexCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  return s:GetIndex()->SplitItems(a:ArgLead)
-endfunction
-
-command! -nargs=? -complete=customlist,IndexCompl Index call s:GetIndex()->FileFilter(<q-args>)->DropInQf('Index')
-
 function! s:GetSource()
   let dir = FugitiveWorkTree()
   if !isdirectory(dir)
@@ -1785,7 +1765,7 @@ endfunction
 
 function s:MakeNiceApp(exe)
   let dst = "/tmp/" .. fnamemodify(a:exe, ":t")
-  let cmd = printf("cp %s %s && setcap cap_sys_nice+ep %s", a:exe, dst, dst)
+  let cmd = printf("cp --preserve=timestamps %s %s && setcap cap_sys_nice+ep %s", a:exe, dst, dst)
   let msg = systemlist(["ssh", s:host, cmd])
   if v:shell_error
     bot new
@@ -1800,21 +1780,21 @@ endfunction
 function! s:PrepareApp(exe)
   if a:exe =~ "mock_video$"
     let nice_exe = s:MakeNiceApp(a:exe)
-    return #{exe: nice_exe, ssh: s:host, user: "rock-video"}
+    return #{exe: nice_exe, user: "rock-video"}
   elseif a:exe =~ "obsidian-video$"
     let nice_exe = s:MakeNiceApp(a:exe)
-    return #{exe: nice_exe, ssh: s:host, user: "rock-video"}
+    return #{exe: nice_exe, user: "rock-video"}
   elseif a:exe =~ "rtsp-server$"
     let nice_exe = s:MakeNiceApp(a:exe)
     let nice_exe ..= " --noauth"
-    return #{exe: nice_exe, ssh: s:host, user: "rtsp-server"}
+    return #{exe: nice_exe, user: "rtsp-server"}
   elseif a:exe =~ "badge_and_face$"
     let nice_exe = s:MakeNiceApp(a:exe)
-    return #{exe: nice_exe, ssh: s:host, user: "badge_and_face"}
+    return #{exe: nice_exe, user: "badge_and_face"}
   elseif !empty(a:exe)
-    return #{exe: a:exe, ssh: s:host}
+    return #{exe: a:exe}
   else
-    return #{headless: v:true, ssh: s:host}
+    return #{headless: v:true}
   endif
 endfunction
 
@@ -1823,40 +1803,49 @@ function! s:DebugApp(exe, run)
   if a:run
     let opts['br'] = s:GetDebugLoc()
   endif
+  let opts['ssh'] = s:host
   call s:Debug(opts)
 endfunction
 
-function s:ChangeHost(host, check)
-  if empty(a:host)
-    echo "Current host is: " .. s:host
-    return
-  endif
-  if a:host == 'localhost'
-    command! -nargs=? -complete=customlist,ExeCompl Start call s:StartDebug(<q-args>)
-    command! -nargs=? -complete=customlist,ExeCompl Run call s:RunDebug(<q-args>)
-    command! -nargs=1 -complete=customlist,AttachCompl Attach call s:AttachDebug(<q-args>)
-    silent! delcommand Sshfs
-    silent! unlet s:host
-    return
-  endif
+function! s:DisableHost()
+  silent! unlet s:default_host
+  silent! unlet s:host
 
+  silent! delcommand Sshfs
+
+  nunmap <leader>re
+  nunmap <leader>rv
+  nunmap <leader>rs
+  nunmap <leader>rb
+
+  command! -nargs=? -complete=customlist,ExeCompl Start call s:StartDebug(<q-args>)
+  command! -nargs=? -complete=customlist,ExeCompl Run call s:RunDebug(<q-args>)
+  command! -nargs=1 -complete=customlist,AttachCompl Attach call s:AttachDebug(<q-args>)
+endfunction
+
+command! -nargs=0 Localhost call s:DisableHost()
+
+function! s:ChangeHost(host, check)
+  let host = empty(a:host) ? s:default_host : a:host
   if a:check
-    call system(["ssh", "-o", "ConnectTimeout=1", a:host, "exit"])
+    call system(["ssh", "-o", "ConnectTimeout=1", host, "exit"])
     if v:shell_error != 0
-      echo "Failed to connect to host " . a:host
+      echo "Failed to connect to host " . host
       return
     endif
   endif
-  let s:host = a:host
+  let s:host = host
   exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start call <SID>DebugApp(<q-args>, v:false)")
   exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run call <SID>DebugApp(<q-args>, v:true)")
   exe printf("command! -nargs=1 Attach call <SID>RemoteAttach('%s', <q-args>)", s:host)
   exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs call <SID>Sshfs('%s', <q-args>)", s:host)
 endfunction
 
-command! -nargs=? -complete=customlist,ChangeHostCompl Host call s:ChangeHost(<q-args>, 1)
+command! -nargs=? -complete=customlist,ChangeHostCompl Host call s:ChangeHost(<q-args>, v:true)
 
-function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
+call s:ChangeHost(s:host, v:false)
+
+function! ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
@@ -1865,8 +1854,6 @@ function ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   let hosts = map(matches, "v:val.submatches[0]")
   return filter(hosts, "stridx(v:val, a:ArgLead) >= 0")
 endfunction
-
-call s:ChangeHost(s:host, v:false)
 
 function! StopServices()
   let stop_list = [
@@ -1903,13 +1890,27 @@ function! DropClients()
   endif
 endfunction
 
-function! UpdateSDK()
+function! UpdateSDK(...)
   split
   enew
   let cmds = []
-  call add(cmds, printf("sudo cp -v ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s/sysroots/armv8a-aisys-linux/usr/lib/", s:sdk_dir))
-  call add(cmds, printf("sudo cp -v -r ~/libalcatraz/include/alcatraz/* %s/sysroots/armv8a-aisys-linux/usr/include/alcatraz/", s:sdk_dir))
+  if a:0 > 0
+    call add(cmds, printf("sudo cp -v ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s/sysroots/armv8a-aisys-linux/usr/lib/", s:sdk_dir))
+    call add(cmds, printf("sudo cp -v -r ~/libalcatraz/include/alcatraz/* %s/sysroots/armv8a-aisys-linux/usr/include/alcatraz/", s:sdk_dir))
+  endif
   call add(cmds, printf("scp ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s:/usr/lib", s:host))
+  call termopen(join(cmds, ";"))
+  startinsert
+endfunction
+
+function! UpdateMPP(...)
+  split
+  enew
+  let cmds = []
+  if a:0 > 0
+    call add(cmds, printf("sudo cp -v ~/mpp/Debug/mpp/librockchip_mpp.so* %s/sysroots/armv8a-aisys-linux/usr/lib/", s:sdk_dir))
+  endif
+  call add(cmds, printf("scp ~/mpp/Debug/mpp/librockchip_mpp.so* %s:/usr/lib", s:host))
   call termopen(join(cmds, ";"))
   startinsert
 endfunction
