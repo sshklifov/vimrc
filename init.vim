@@ -307,7 +307,7 @@ endfunction
 
 function! HostStatusLine()
   if exists('s:host') && s:host != s:default_host
-    return "((" .. s:host .. "))"
+    return "(" .. s:host .. ")"
    else
      return ''
    endif
@@ -1212,6 +1212,10 @@ function! s:Debug(args)
   autocmd! User PromptDebugStopPost call s:DebugStopPost()
   autocmd! User PromptDebugRunPost call s:DebugRunPost()
 
+  " Remove annoying highlighting
+  highlight clear LspReferenceText
+  highlight LspReferenceText gui=NONE
+
   " Open GDB
   if has_key(a:args, "ssh")
     if has_key(a:args, "user")
@@ -1307,6 +1311,10 @@ function! s:DebugStopPost()
   silent! delcommand Threads
   silent! delcommand Break
   silent! delcommand Commands
+
+  " Restore highlighting
+  highlight clear LspReferenceText
+  highlight LspReferenceText guibg=#51576e gui=underline
 endfunction
 
 function! s:GetDebugLoc()
@@ -1334,7 +1342,7 @@ command! -nargs=0 LspProg lua print(vim.inspect(vim.lsp.status()))
 command! -nargs=0 -range=% For lua vim.lsp.buf.format{ range = {start= {<line1>, 0}, ["end"] = {<line2>, 0}} }
 
 " Document highlight
-highlight LspReferenceText gui=underline
+highlight LspReferenceText guibg=#51576e gui=underline
 highlight! link LspReferenceRead LspReferenceText
 highlight! link LspReferenceWrite LspReferenceText
 
@@ -1890,29 +1898,51 @@ function! DropClients()
   endif
 endfunction
 
-function! UpdateSDK(...)
+function! InstallSdk()
+  let sdks = systemlist(["find", "/home/" .. $USER .. "/aidistro/cache/tmp/deploy/sdk/", "-regex", ".*image.*dev.sh"])
+  let most_recent_file = sdks[0]
+  for file in sdks[1:]
+    if getftime(file) > getftime(most_recent_file)
+      let most_recent_file = file
+    endif
+  endfor
   split
   enew
-  let cmds = []
-  if a:0 > 0
-    call add(cmds, printf("sudo cp -v ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s/sysroots/armv8a-aisys-linux/usr/lib/", s:sdk_dir))
-    call add(cmds, printf("sudo cp -v -r ~/libalcatraz/include/alcatraz/* %s/sysroots/armv8a-aisys-linux/usr/include/alcatraz/", s:sdk_dir))
-  endif
-  call add(cmds, printf("scp ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s:/usr/lib", s:host))
-  call termopen(join(cmds, ";"))
+  call termopen(["sudo", most_recent_file])
   startinsert
 endfunction
 
-function! UpdateMPP(...)
-  split
-  enew
+function! UpdateLocal(with_what)
   let cmds = []
-  if a:0 > 0
+  if has_key(a:with_what, 'libalcatraz')
+    call add(cmds, printf("sudo cp -v ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s/sysroots/armv8a-aisys-linux/usr/lib/", s:sdk_dir))
+    call add(cmds, printf("sudo cp -v -r ~/libalcatraz/include/alcatraz/* %s/sysroots/armv8a-aisys-linux/usr/include/alcatraz/", s:sdk_dir))
+  endif
+  if has_key(a:with_what, 'mpp')
     call add(cmds, printf("sudo cp -v ~/mpp/Debug/mpp/librockchip_mpp.so* %s/sysroots/armv8a-aisys-linux/usr/lib/", s:sdk_dir))
   endif
-  call add(cmds, printf("scp ~/mpp/Debug/mpp/librockchip_mpp.so* %s:/usr/lib", s:host))
-  call termopen(join(cmds, ";"))
-  startinsert
+  if !empty(cmds)
+    split
+    enew
+    call termopen(join(cmds, ";"))
+    startinsert
+  endif
+endfunction
+
+function! UpdateRemote(with_what)
+  let cmds = []
+  if has_key(a:with_what, 'libalcatraz')
+    call add(cmds, printf("scp ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s:/usr/lib", s:host))
+  endif
+  if has_key(a:with_what, 'mpp')
+    call add(cmds, printf("scp ~/mpp/Debug/mpp/librockchip_mpp.so* %s:/usr/lib", s:host))
+  endif
+  if !empty(cmds)
+    split
+    enew
+    call termopen(join(cmds, ";"))
+    startinsert
+  endif
 endfunction
 
 function! s:ToClipboardApp(app)
