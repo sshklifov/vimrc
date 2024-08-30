@@ -1614,7 +1614,8 @@ endfunction
 """"""""""""""""""""""""""""Building"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 let s:build_type = "Debug"
-let s:sdk_dir = "/opt/aisys/obsidian_p10"
+let s:sdk = "p10"
+let s:sdk_dir = "/opt/aisys/obsidian_" .. s:sdk
 
 function s:ObsidianMake(...)
   let repo = FugitiveWorkTree()
@@ -1793,10 +1794,7 @@ function s:MakeNiceApp(exe)
   let cmd = printf("cp --preserve=timestamps %s %s && setcap cap_sys_nice+ep %s", a:exe, dst, dst)
   let msg = systemlist(["ssh", s:host, cmd])
   if v:shell_error
-    bot new
-    setlocal buftype=nofile
-    call setline(1, msg[0])
-    call append(1, msg[1:])
+    call s:ShowErrors(msg)
     throw "Failed to prepare " . a:exe
   endif
   return dst
@@ -1880,6 +1878,21 @@ function! ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   return filter(hosts, "stridx(v:val, a:ArgLead) >= 0")
 endfunction
 
+function! s:ToClipboardApp(app)
+  " call StopServices()
+  let opts = s:PrepareApp(a:app)
+  let cmd = printf("sudo -u %s %s", opts['user'], opts['exe'])
+  let @+ = cmd
+  echom printf("Copied to clipboard: '%s'.", cmd)
+endfunction
+
+nnoremap <silent> <leader>re <cmd>call <SID>Resync()<CR>
+nnoremap <silent> <leader>rv <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/application/obsidian-video")<CR>
+nnoremap <silent> <leader>rs <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/application/rtsp-server")<CR>
+nnoremap <silent> <leader>rb <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/bin/badge_and_face")<CR>
+"}}}
+
+""""""""""""""""""""""""""""Utility functions"""""""""""""""""""""""""""" {{{
 function! StopServices()
   let stop_list = [
         \ "rtsp-server-noauth",
@@ -1915,8 +1928,29 @@ function! DropClients()
   endif
 endfunction
 
-function! InstallSdk()
-  let sdks = systemlist(["find", "/home/" .. $USER .. "/aidistro/cache/tmp/deploy/sdk/", "-regex", ".*image.*dev.sh"])
+function! UpdateDocker() abort
+  sp ~/aidistro/bashrc
+  call search('^p="\i*"')
+  call setline('.', printf('p="%s"', s:sdk))
+  call search('^host="\i*"')
+  call setline('.', printf('host="%s"', s:host))
+  write
+  enew
+  lcd ~/aidistro/repo
+  G pull origin master
+  lcd ~/aidistro
+  let cmds = ["sudo docker-compose build ubuntu22", "sudo docker-compose run ubuntu22"]
+  call termopen(join(cmds, ";"))
+  " execute printf("autocmd WinClosed %d call InstallSdk(v:true)", win_getid())
+  startinsert
+endfunction
+
+function! InstallSdk() abort
+  let sdks = systemlist(["find", "/home/" .. $USER .. "/aidistro/cache/tmp/deploy/sdk/", "-regex", printf(".*%s.*dev.sh", s:sdk)])
+  if empty(sdks)
+    echo "No sdk found"
+    return
+  endif
   let most_recent_file = sdks[0]
   for file in sdks[1:]
     if getftime(file) > getftime(most_recent_file)
@@ -1925,7 +1959,25 @@ function! InstallSdk()
   endfor
   split
   enew
-  call termopen(["sudo", most_recent_file])
+  call termopen(printf("sudo %s -d /opt/aisys/obsidian_%s/ -y", most_recent_file, s:sdk))
+  startinsert
+endfunction
+
+function! InstallRemoteSdk()
+  let images = systemlist(["find", "/home/" .. $USER .. "/aidistro/cache/tmp/deploy/images/", "-regex", printf(".*%s.*mender", s:sdk)])
+  if empty(images)
+    echo "No image found"
+    return
+  endif
+  let most_recent_image = images[0]
+  for image in images[1:]
+    if getftime(image) > getftime(most_recent_image)
+      let most_recent_image = image
+    endif
+  endfor
+  split
+  enew
+  call termopen(printf("scp %s %s:/tmp/image.mender", most_recent_image, s:host))
   startinsert
 endfunction
 
@@ -1962,18 +2014,28 @@ function! UpdateRemote(with_what)
   endif
 endfunction
 
-function! s:ToClipboardApp(app)
-  " call StopServices()
-  let opts = s:PrepareApp(a:app)
-  let cmd = printf("sudo -u %s %s", opts['user'], opts['exe'])
-  let @+ = cmd
-  echom printf("Copied to clipboard: '%s'.", cmd)
-endfunction
+function! HostDebugSyms(pat)
+  let dir = s:sdk_dir .. "/sysroots/armv8a-aisys-linux/usr/lib/.debug"
+  let pat = ".*" .. a:pat .. ".*"
+  let files = systemlist(["find", dir, "-regex", pat])
+  let bytes = 0
+  for file in files
+    let bytes += getfsize(file)
+  endfor
+  let max_bytes = 100 * 1000 * 1000
+  if bytes > max_bytes
+    echo "Too much debugging symbols selected."
+    return
+  endif
 
-nnoremap <silent> <leader>re <cmd>call <SID>Resync()<CR>
-nnoremap <silent> <leader>rv <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/application/obsidian-video")<CR>
-nnoremap <silent> <leader>rs <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/application/rtsp-server")<CR>
-nnoremap <silent> <leader>rb <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/bin/badge_and_face")<CR>
+  let remote_dir = s:host . ":/usr/lib/.debug"
+  let msg = systemlist(printf("rsync -lt %s %s", join(files), remote_dir))
+  if v:shell_error
+    call s:ShowErrors(msg)
+  else
+    echo "Debug symbols installed!"
+  endif
+endfunction
 "}}}
 
 """"""""""""""""""""""""""""Testing"""""""""""""""""""""""""""" {{{
@@ -2028,7 +2090,7 @@ function! s:FetchAI()
     throw "Failed to pull aidistro"
   endif
 
-  for [repo, branch, bitbake] in targets
+  for [repo, branch, _] in targets
     " Find new hash
     exe "e " .. repo
     let dict = FugitiveExecute(["fetch", "origin", branch])
@@ -2043,7 +2105,8 @@ function! s:FetchAI()
     exe "e " .. repo
     let new_hash = s:HashOrThrow("origin/" .. branch)
     " Find old hash
-    exe "Ol " .. bitbake
+    let id = QuickFind("~/aidistro/repo", "-regex", ".*" .. bitbake)
+    call jobwait([id])
     if search("SRCREV") == 0
       throw "Failed to find bitbake file"
     endif
