@@ -1417,12 +1417,7 @@ endfunction
 
 autocmd User LspProgressUpdate call <SID>UpdateLspProgress()
 
-function! FindCompl(ArgLead, CmdLine, CursorPos) abort
-  let cmd = substitute(a:CmdLine[:a:CursorPos-1], 'Find', 'find', '')
-  return CmdCompl(cmd)
-endfunction
-
-command! -nargs=+ -complete=customlist,FindCompl Find call QuickFind(<f-args>)
+command! -nargs=* Find call QuickFind(getcwd(), "-regex", ".*" .. <q-args> .. ".*")
 
 command! -nargs=+ Grepo call QuickGrep(<q-args>, FugitiveWorkTree())
 
