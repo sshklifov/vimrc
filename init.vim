@@ -25,7 +25,7 @@ if !isdirectory(printf("/home/%s/.local/share/nvim/plugged", $USER))
 endif
 
 let s:default_host = "p10"
-let s:host = "miro_camera"
+let s:host = "p10"
 
 " Redefine the group, avoids having the same autocommands twice
 augroup VimStartup
@@ -720,6 +720,55 @@ endfunction
 
 command! -nargs=1 -complete=customlist,OriginCompl Origin call <SID>SwitchToBranch(<q-args>)
 
+function! s:ShowErrors(errors)
+  let errors = map(a:errors, "strtrans(v:val)")
+  bot new
+  setlocal buftype=nofile
+  if empty(errors)
+    call setline(1, "<No errors to show>")
+  else
+    call setline(1, errors[0])
+    call append(1, errors[1:])
+  endif
+endfunction
+
+function! s:UpdateBranch(force)
+  let branch = FugitiveHead()
+  let check_file = printf("%s/refs/remotes/origin/%s", FugitiveGitDir(), branch)
+  if !filereadable(check_file)
+    echo "Could not find origin/" .. branch
+    return
+  endif
+
+  let args = ["fetch", "origin", branch]
+  let dict = FugitiveExecute(args)
+  if dict['exit_status'] != 0
+    return s:ShowErrors(dict['stderr'])
+  endif
+
+  const range = printf("%s..origin/%s", branch, branch)
+  let args = ["log", "--pretty=format:%h", range]
+  let dict = FugitiveExecute(args)
+  if dict['exit_status'] != 0
+    return s:ShowErrors(dict['stderr'])
+  endif
+  const commits = filter(dict['stdout'], "!empty(v:val)")
+
+  let args = ["merge", "origin/" .. branch]
+  let dict = FugitiveExecute(args)
+  if dict['exit_status'] != 0
+    return s:ShowErrors(dict['stderr'])
+  endif
+
+  if len(commits) > 0
+    exe printf("G log -n %d %s", len(commits), commits[0])
+  else
+    echo "No changes."
+  endif
+endfunction
+
+command! -nargs=0 -bang Pull call s:UpdateBranch('<bang>')
+
 function! OriginCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
@@ -748,6 +797,7 @@ function! s:RecentRefs(max_refs)
 endfunction
 
 command -nargs=1 -complete=customlist,ReflogCompl Reflog call <SID>SwitchToBranch(<q-args>)
+cabbr Ref Reference
 
 function! ReflogCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -816,6 +866,7 @@ function! s:Review(arg)
   if exists("g:review_stack")
     let items = g:review_stack[-1]
     call DisplayInQf(items, "Review")
+    echo "Review in progress, refreshing quickfix..."
     return
   endif
 
@@ -1172,7 +1223,7 @@ function! ExeCompl(ArgLead, CmdLine, CursorPos)
 endfunction
 
 function! s:AttachDebug(proc)
-  let pids = systemlist(["pgrep", "-f", proc])
+  let pids = systemlist(["pgrep", "-f", a:proc])
   " Report error
   if len(pids) == 0
     echo "No processes found"
