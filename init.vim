@@ -402,8 +402,30 @@ function! WindowCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return s:GetWindows(a:ArgLead, 1)
+  let windows = s:GetWindows(a:ArgLead, 1)
+  return uniq(sort(windows))
 endfunction
+
+function! s:SimplifyTabs(max_count)
+  let infos = map(range(1, bufnr('$')), 'getbufinfo(v:val)')
+  call filter(infos, '!empty(v:val)')
+  call map(infos, 'v:val[0]')
+  let Cmp = {a, b -> b['lastused'] - a['lastused']}
+  call sort(infos, Cmp)
+
+  silent! tabonly
+  silent! only
+  exe "b " .. infos[0]['bufnr']
+  for i in range(1, a:max_count - 1)
+    if i < len(infos) && filereadable(infos[i]['name'])
+      tabnew
+      exe "b " .. infos[i]['bufnr']
+    endif
+  endfor
+  tabfirst
+endfunction
+
+command! -nargs=? Simp call s:SimplifyTabs(empty(<q-args>) ? 5 : <q-args>)
 
 " CursorHold time
 set updatetime=500
