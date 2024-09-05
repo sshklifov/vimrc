@@ -1658,6 +1658,16 @@ endfunction
 function! s:Sshfs(remote, args)
   silent exe "tabnew scp://" . a:remote . "/" . a:args
 endfunction
+
+function! s:Scp(remote)
+  let cmd = printf("scp %s %s:/tmp", expand("%:p"), a:remote)
+  let ret = systemlist(cmd)
+  if v:shell_error
+    call s:ShowErrors(ret)
+  else
+    echo "Copied to /tmp."
+  endif
+endfunction
 "}}}
 
 " Context dependent
@@ -1886,6 +1896,7 @@ function! s:DisableHost()
   silent! unlet s:host
 
   silent! delcommand Sshfs
+  silent! delcommand Scp
 
   nunmap <leader>re
   nunmap <leader>rv
@@ -1913,6 +1924,7 @@ function! s:ChangeHost(host, check)
   exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run call <SID>DebugApp(<q-args>, v:true)")
   exe printf("command! -nargs=1 Attach call <SID>RemoteAttach('%s', <q-args>)", s:host)
   exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs call <SID>Sshfs('%s', <q-args>)", s:host)
+  exe printf("command! -nargs=0 Scp call <SID>Scp('%s')", s:host)
 endfunction
 
 command! -nargs=? -complete=customlist,ChangeHostCompl Host call s:ChangeHost(<q-args>, v:true)
@@ -1944,6 +1956,11 @@ nnoremap <silent> <leader>rb <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/bin/b
 "}}}
 
 """"""""""""""""""""""""""""Utility functions"""""""""""""""""""""""""""" {{{
+function Help()
+  echom ["StopServices", "DropClients", "UpdateDocker", "RunDocker", "InstallSdk",
+        \ "InstallMender", "UpdateLocal", "UpdateRemote", "HostDebugSyms"]
+endfunction
+
 function! StopServices()
   let stop_list = [
         \ "rtsp-server-noauth",
@@ -1988,7 +2005,13 @@ function! UpdateDocker() abort
   write
   enew
   lcd ~/aidistro/repo
-  G pull origin master
+  1,1G! --paginate pull origin master
+  set nomodified
+endfunction
+
+function! RunDocker() abort
+  sp
+  enew
   lcd ~/aidistro
   let cmds = ["sudo docker-compose build ubuntu22", "sudo docker-compose run ubuntu22"]
   call termopen(join(cmds, ";"))
@@ -2014,7 +2037,7 @@ function! InstallSdk() abort
   startinsert
 endfunction
 
-function! InstallRemoteSdk()
+function! InstallMender()
   let images = systemlist(["find", "/home/" .. $USER .. "/aidistro/cache/tmp/deploy/images/", "-regex", printf(".*%s.*mender", s:sdk)])
   if empty(images)
     echo "No image found"
