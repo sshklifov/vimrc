@@ -720,10 +720,10 @@ function! BranchCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return s:GetRefs(['refs/heads', 'refs/tags', 'refs/remotes'], a:ArgLead)
+  return s:GetRefs(['refs/heads', 'refs/tags'], a:ArgLead)
 endfunction
 
-command! -nargs=1 -complete=customlist,OriginCompl Origin call <SID>SwitchToBranch(<q-args>)
+command! -nargs=1 -complete=customlist,OriginCompl Origin call s:TryCall("s:SwitchToBranch", <q-args>)
 
 function! s:ShowErrors(errors)
   let errors = map(a:errors, "strtrans(v:val)")
@@ -737,7 +737,7 @@ function! s:ShowErrors(errors)
   endif
 endfunction
 
-function! s:UpdateBranch(force)
+function! s:UpdateBranch()
   let branch = FugitiveHead()
   let check_file = printf("%s/refs/remotes/origin/%s", FugitiveGitDir(), branch)
   if !filereadable(check_file)
@@ -759,20 +759,19 @@ function! s:UpdateBranch(force)
   endif
   const commits = filter(dict['stdout'], "!empty(v:val)")
 
+  if len(commits) <= 0
+    echo "No changes."
+    return
+  endif
+
   let args = ["merge", "origin/" .. branch]
   let dict = FugitiveExecute(args)
   if dict['exit_status'] != 0
     return s:ShowErrors(dict['stderr'])
   endif
-
-  if len(commits) > 0
-    exe printf("G log -n %d %s", len(commits), commits[0])
-  else
-    echo "No changes."
-  endif
 endfunction
 
-command! -nargs=0 -bang Pull call s:UpdateBranch('<bang>')
+command! -nargs=0 Pull call s:UpdateBranch()
 
 function! OriginCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -801,7 +800,7 @@ function! s:RecentRefs(max_refs)
   return refs
 endfunction
 
-command -nargs=1 -complete=customlist,ReflogCompl Reflog call <SID>SwitchToBranch(<q-args>)
+command -nargs=1 -complete=customlist,ReflogCompl Reflog call s:TryCall("s:SwitchToBranch", <q-args>)
 cabbr Ref Reference
 
 function! ReflogCompl(ArgLead, CmdLine, CursorPos)
@@ -1926,11 +1925,11 @@ function! s:ChangeHost(host, check)
     endif
   endif
   let s:host = host
-  exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start call <SID>DebugApp(<q-args>, v:false)")
-  exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run call <SID>DebugApp(<q-args>, v:true)")
-  exe printf("command! -nargs=1 Attach call <SID>RemoteAttach('%s', <q-args>)", s:host)
-  exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs call <SID>Sshfs('%s', <q-args>)", s:host)
-  exe printf("command! -nargs=0 Scp call <SID>Scp('%s')", s:host)
+  exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Start call s:TryCall('s:DebugApp', <q-args>, v:false)")
+  exe printf("command! -nargs=? -complete=customlist,RemoteExeCompl Run call s:TryCall('s:DebugApp', <q-args>, v:true)")
+  exe printf("command! -nargs=1 Attach call s:RemoteAttach('%s', <q-args>)", s:host)
+  exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs call s:Sshfs('%s', <q-args>)", s:host)
+  exe printf("command! -nargs=0 Scp call s:Scp('%s')", s:host)
 endfunction
 
 command! -nargs=? -complete=customlist,ChangeHostCompl Host call s:ChangeHost(<q-args>, v:true)
@@ -1956,9 +1955,9 @@ function! s:ToClipboardApp(app)
 endfunction
 
 nnoremap <silent> <leader>re <cmd>call <SID>Resync()<CR>
-nnoremap <silent> <leader>rv <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/application/obsidian-video")<CR>
-nnoremap <silent> <leader>rs <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/application/rtsp-server")<CR>
-nnoremap <silent> <leader>rb <cmd>call <SID>ToClipboardApp("/var/tmp/Debug/bin/badge_and_face")<CR>
+nnoremap <silent> <leader>rv <cmd>call <SID>TryCall('s:ToClipboardApp', "/var/tmp/Debug/application/obsidian-video")<CR>
+nnoremap <silent> <leader>rs <cmd>call <SID>TryCall('s:ToClipboardApp', "/var/tmp/Debug/application/rtsp-server")<CR>
+nnoremap <silent> <leader>rb <cmd>call <SID>TryCall('s:ToClipboardApp', "/var/tmp/Debug/bin/badge_and_face")<CR>
 "}}}
 
 """"""""""""""""""""""""""""Utility functions"""""""""""""""""""""""""""" {{{
