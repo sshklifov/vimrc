@@ -33,11 +33,15 @@ autocmd BufWritePost /home/$USER/.config/nvim/init.vim source ~/.config/nvim/ini
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 " Local config variables
-let s:default_host = "p10"
-let s:host = "p10"
-let s:build_type = "Debug"
-let s:sdk = "p10"
-let s:sdk_dir = "/opt/aisys/obsidian_" .. s:sdk
+
+let s:is_work_pc = isdirectory("/opt/aisys")
+if s:is_work_pc
+  let s:default_host = "p10"
+  let s:host = "p10"
+  let s:build_type = "Debug"
+  let s:sdk = "p10"
+  let s:sdk_dir = "/opt/aisys/obsidian_" .. s:sdk
+endif
 
 " sshklifov/debug
 let g:promptdebug_commands = 0
@@ -1723,10 +1727,6 @@ function s:ObsidianMake(...)
   return Make(command, bang)
 endfunction
 
-command! -nargs=0 -bang Make call <SID>ObsidianMake("<bang>")
-
-command! -nargs=0 Clean call system("rm -rf " . FugitiveFind(s:build_type))
-
 function! s:ResolveEnvFile()
   let fname = expand("%:f")
   let resolved = ""
@@ -1759,7 +1759,11 @@ function! s:ResolveEnvFile()
   endif
 endfunction
 
-nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
+if s:is_work_pc
+  command! -nargs=0 -bang Make call <SID>ObsidianMake("<bang>")
+  command! -nargs=0 Clean call system("rm -rf " . FugitiveFind(s:build_type))
+  nnoremap <silent> <leader>env :call <SID>ResolveEnvFile()<CR>
+endif
 "}}}
 
 """"""""""""""""""""""""""""Host commands"""""""""""""""""""""""""""" {{{
@@ -1896,25 +1900,6 @@ function! s:DebugApp(exe, run)
   call s:Debug(opts)
 endfunction
 
-function! s:DisableHost()
-  silent! unlet s:default_host
-  silent! unlet s:host
-
-  silent! delcommand Sshfs
-  silent! delcommand Scp
-
-  nunmap <leader>re
-  nunmap <leader>rv
-  nunmap <leader>rs
-  nunmap <leader>rb
-
-  command! -nargs=? -complete=customlist,ExeCompl Start call s:StartDebug(<q-args>)
-  command! -nargs=? -complete=customlist,ExeCompl Run call s:RunDebug(<q-args>)
-  command! -nargs=1 -complete=customlist,AttachCompl Attach call s:AttachDebug(<q-args>)
-endfunction
-
-command! -nargs=0 Localhost call s:DisableHost()
-
 function! s:ChangeHost(host, check)
   let host = empty(a:host) ? s:default_host : a:host
   if a:check
@@ -1931,10 +1916,6 @@ function! s:ChangeHost(host, check)
   exe printf("command! -nargs=1 -complete=customlist,SshfsCompl Sshfs call s:Sshfs('%s', <q-args>)", s:host)
   exe printf("command! -nargs=0 Scp call s:Scp('%s')", s:host)
 endfunction
-
-command! -nargs=? -complete=customlist,ChangeHostCompl Host call s:ChangeHost(<q-args>, v:true)
-
-call s:ChangeHost(s:host, v:false)
 
 function! ChangeHostCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -1954,19 +1935,43 @@ function! s:ToClipboardApp(app)
   echom printf("Copied to clipboard: '%s'.", cmd)
 endfunction
 
-nnoremap <silent> <leader>re <cmd>call <SID>Resync()<CR>
-nnoremap <silent> <leader>rv <cmd>call <SID>TryCall('s:ToClipboardApp', "/var/tmp/Debug/application/obsidian-video")<CR>
-nnoremap <silent> <leader>rs <cmd>call <SID>TryCall('s:ToClipboardApp', "/var/tmp/Debug/application/rtsp-server")<CR>
-nnoremap <silent> <leader>rb <cmd>call <SID>TryCall('s:ToClipboardApp', "/var/tmp/Debug/bin/badge_and_face")<CR>
+if s:is_work_pc
+  command! -nargs=? -complete=customlist,ChangeHostCompl Host call s:ChangeHost(<q-args>, v:true)
+  call s:ChangeHost(s:host, v:false)
+
+  nnoremap <silent> <leader>re <cmd>call <SID>Resync()<CR>
+  nnoremap <silent> <leader>rv <cmd>call <SID>TryCall('s:ToClipboardApp', "/var/tmp/Debug/application/obsidian-video")<CR>
+  nnoremap <silent> <leader>rs <cmd>call <SID>TryCall('s:ToClipboardApp', "/var/tmp/Debug/application/rtsp-server")<CR>
+  nnoremap <silent> <leader>rb <cmd>call <SID>TryCall('s:ToClipboardApp', "/var/tmp/Debug/bin/badge_and_face")<CR>
+else
+  " Install local commands for debugging.
+  command! -nargs=? -complete=customlist,ExeCompl Start call s:StartDebug(<q-args>)
+  command! -nargs=? -complete=customlist,ExeCompl Run call s:RunDebug(<q-args>)
+  command! -nargs=1 -complete=customlist,AttachCompl Attach call s:AttachDebug(<q-args>)
+endif
 "}}}
 
 """"""""""""""""""""""""""""Utility functions"""""""""""""""""""""""""""" {{{
-function Help()
-  echom ["StopServices", "DropClients", "UpdateDocker", "RunDocker", "InstallSdk",
-        \ "InstallMender", "UpdateLocal", "UpdateRemote", "HostDebugSyms"]
+function s:Do(cmd, ...)
+  let Partial = function("s:" .. a:cmd, a:000)
+  call Partial()
 endfunction
 
-function! StopServices()
+if s:is_work_pc
+  command -nargs=+ -complete=customlist,DoCompl Do call s:Do(<f-args>)
+endif
+
+function! DoCompl(ArgLead, CmdLine, CursorPos)
+  let nargs = len(split(a:CmdLine))
+  if a:CursorPos < len(a:CmdLine) || nargs > 2
+    return []
+  endif
+  let cmds = ["StopServices", "DropClients", "UpdateDocker", "RunDocker",
+        \ "InstallSdk", "InstallMender", "HostDebugSyms"]
+  return filter(cmds, "stridx(v:val, a:ArgLead) >= 0")
+endfunction
+
+function! s:StopServices()
   let stop_list = [
         \ "rtsp-server-noauth",
         \ "rtsp-server.socket",
@@ -1992,7 +1997,7 @@ function! StopServices()
   echo "Stopped."
 endfunction
 
-function! DropClients()
+function! s:DropClients()
   sp ~/obsidian-video
   Source fd_transmitter
   if search("DropTimeoutClients") == 0
@@ -2001,7 +2006,7 @@ function! DropClients()
   endif
 endfunction
 
-function! UpdateDocker()
+function! s:UpdateDocker()
   sp ~/aidistro/bashrc
   call search('^p="\i*"')
   call setline('.', printf('p="%s"', s:sdk))
@@ -2014,7 +2019,7 @@ function! UpdateDocker()
   set nomodified
 endfunction
 
-function! RunDocker() abort
+function! s:RunDocker()
   sp
   enew
   lcd ~/aidistro
@@ -2023,7 +2028,7 @@ function! RunDocker() abort
   startinsert
 endfunction
 
-function! InstallSdk() abort
+function! s:InstallSdk()
   let sdks = systemlist(["find", "/home/" .. $USER .. "/aidistro/cache/tmp/deploy/sdk/", "-regex", printf(".*%s.*dev.sh", s:sdk)])
   if empty(sdks)
     echo "No sdk found"
@@ -2041,7 +2046,7 @@ function! InstallSdk() abort
   startinsert
 endfunction
 
-function! InstallMender()
+function! s:InstallMender()
   let images = systemlist(["find", "/home/" .. $USER .. "/aidistro/cache/tmp/deploy/images/", "-regex", printf(".*%s.*mender", s:sdk)])
   if empty(images)
     echo "No image found"
@@ -2059,40 +2064,40 @@ function! InstallMender()
   startinsert
 endfunction
 
-function! UpdateLocal(with_what)
-  let cmds = []
-  if has_key(a:with_what, 'libalcatraz')
-    call add(cmds, printf("sudo cp -v ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s/sysroots/armv8a-aisys-linux/usr/lib/", s:sdk_dir))
-    call add(cmds, printf("sudo cp -v -r ~/libalcatraz/include/alcatraz/* %s/sysroots/armv8a-aisys-linux/usr/include/alcatraz/", s:sdk_dir))
-  endif
-  if has_key(a:with_what, 'mpp')
-    call add(cmds, printf("sudo cp -v ~/mpp/Debug/mpp/librockchip_mpp.so* %s/sysroots/armv8a-aisys-linux/usr/lib/", s:sdk_dir))
-  endif
-  if !empty(cmds)
-    split
-    enew
-    call termopen(join(cmds, ";"))
-    startinsert
-  endif
-endfunction
+" function! s:UpdateLocal(with_what)
+"   let cmds = []
+"   if has_key(a:with_what, 'libalcatraz')
+"     call add(cmds, printf("sudo cp -v ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s/sysroots/armv8a-aisys-linux/usr/lib/", s:sdk_dir))
+"     call add(cmds, printf("sudo cp -v -r ~/libalcatraz/include/alcatraz/* %s/sysroots/armv8a-aisys-linux/usr/include/alcatraz/", s:sdk_dir))
+"   endif
+"   if has_key(a:with_what, 'mpp')
+"     call add(cmds, printf("sudo cp -v ~/mpp/Debug/mpp/librockchip_mpp.so* %s/sysroots/armv8a-aisys-linux/usr/lib/", s:sdk_dir))
+"   endif
+"   if !empty(cmds)
+"     split
+"     enew
+"     call termopen(join(cmds, ";"))
+"     startinsert
+"   endif
+" endfunction
 
-function! UpdateRemote(with_what)
-  let cmds = []
-  if has_key(a:with_what, 'libalcatraz')
-    call add(cmds, printf("scp ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s:/usr/lib", s:host))
-  endif
-  if has_key(a:with_what, 'mpp')
-    call add(cmds, printf("scp ~/mpp/Debug/mpp/librockchip_mpp.so* %s:/usr/lib", s:host))
-  endif
-  if !empty(cmds)
-    split
-    enew
-    call termopen(join(cmds, ";"))
-    startinsert
-  endif
-endfunction
+" function! s:UpdateRemote(with_what)
+"   let cmds = []
+"   if has_key(a:with_what, 'libalcatraz')
+"     call add(cmds, printf("scp ~/libalcatraz/Debug/alcatraz/libalcatraz.so* %s:/usr/lib", s:host))
+"   endif
+"   if has_key(a:with_what, 'mpp')
+"     call add(cmds, printf("scp ~/mpp/Debug/mpp/librockchip_mpp.so* %s:/usr/lib", s:host))
+"   endif
+"   if !empty(cmds)
+"     split
+"     enew
+"     call termopen(join(cmds, ";"))
+"     startinsert
+"   endif
+" endfunction
 
-function! HostDebugSyms(pat)
+function! s:HostDebugSyms(pat)
   let dir = s:sdk_dir .. "/sysroots/armv8a-aisys-linux/usr/lib/.debug"
   let pat = ".*" .. a:pat .. ".*"
   let files = systemlist(["find", dir, "-regex", pat])
@@ -2111,40 +2116,12 @@ function! HostDebugSyms(pat)
   if v:shell_error
     call s:ShowErrors(msg)
   else
+    botr split
+    enew
+    let so = map(files, "fnamemodify(v:val, ':t')")
+    call setline(1, so)
+    set nomodified
     echo "Debug symbols installed!"
-  endif
-endfunction
-"}}}
-
-""""""""""""""""""""""""""""Testing"""""""""""""""""""""""""""" {{{
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-function! s:HistFind(...)
-  " XXX becuase of E464 this is ok
-  let f_list = []
-  for cmd_prefix in a:000
-    call add(f_list, printf('stridx(v:val, "%s") == 0', cmd_prefix))
-  endfor
-  let f_str = join(f_list, ' || ')
-
-  let hist = map(range(1, histnr(':')), 'histget(":", v:val)')
-  let hist = filter(hist, f_str)
-  if empty(hist)
-    return ""
-  else
-    return hist[-1]
-  endif
-endfunction
-
-function! s:Rerun(...)
-  if a:0 == 0
-    return
-  endif
-  let fargs = join(map(range(1, a:0),  "'a:' . v:val"), ", ")
-  let hist_cmd = eval(printf("s:HistFind(%s)", fargs))
-  if empty(hist_cmd)
-    echo "Cannot rerun, not in history"
-  else
-    exe hist_cmd
   endif
 endfunction
 "}}}
@@ -2277,10 +2254,12 @@ function! s:FinishAI()
   echo "Finished!"
 endfunction
 
-command! -nargs=0 FetchAI call s:TryCall("s:FetchAI")
-command! -nargs=0 CommitAI call s:TryCall("s:CommitAI")
-command! -nargs=0 PushAI call s:TryCall("s:PushAI")
-command! -nargs=0 FinishAI call s:TryCall("s:FinishAI")
+if s:is_work_pc
+  command! -nargs=0 AIFetch call s:TryCall("s:FetchAI")
+  command! -nargs=0 AICommit call s:TryCall("s:CommitAI")
+  command! -nargs=0 AIPush call s:TryCall("s:PushAI")
+  command! -nargs=0 AIFinish call s:TryCall("s:FinishAI")
+endif
 " }}}
 
 " Go back to default autocommand group
