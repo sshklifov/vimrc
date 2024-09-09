@@ -24,9 +24,6 @@ if !isdirectory(printf("/home/%s/.local/share/nvim/plugged", $USER))
   finish
 endif
 
-let s:default_host = "p10"
-let s:host = "p10"
-
 " Redefine the group, avoids having the same autocommands twice
 augroup VimStartup
 au!
@@ -35,8 +32,16 @@ autocmd BufWritePost /home/$USER/.config/nvim/init.vim source ~/.config/nvim/ini
 """"""""""""""""""""""""""""Plugin settings"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
+" Local config variables
+let s:default_host = "p10"
+let s:host = "p10"
+let s:build_type = "Debug"
+let s:sdk = "p10"
+let s:sdk_dir = "/opt/aisys/obsidian_" .. s:sdk
+
 " sshklifov/debug
 let g:promptdebug_commands = 0
+let g:promptdebug_program_output = 0
 
 " Tabulous
 let tabulousLabelLeftStr = ' ['
@@ -1289,6 +1294,10 @@ function! s:Debug(args)
   highlight clear LspReferenceText
   highlight LspReferenceText gui=NONE
 
+  " Run configurations once GDB is loaded
+  let cmd = printf("call s:DebugStartPost(%s)", string(a:args))
+  exe "autocmd! User PromptDebugStartPost " .. cmd
+
   " Open GDB
   if has_key(a:args, "ssh")
     if has_key(a:args, "user")
@@ -1299,9 +1308,6 @@ function! s:Debug(args)
   else
     call PromptDebugStart()
   endif
-
-  " Run configurations
-  call s:DebugStartPost(a:args)
 endfunction
 
 function! s:DebugStartPost(args)
@@ -1309,10 +1315,10 @@ function! s:DebugStartPost(args)
 
   command! -nargs=0 Capture call PromptDebugGoToCapture()
   command! -nargs=0 Gdb call PromptDebugGoToGdb()
+  command! -nargs=0 Output call PromptDebugGoToOutput()
   command! -nargs=0 Pwd call PromptDebugShowPwd()
   command! -nargs=0 DebugSym call PromptDebugFindSym(expand('<cword>'))
   command! -nargs=? Break call PromptDebugGoToBreakpoint(<q-args>)
-  command! -nargs=? Commands call PromptDebugEditCommands(<f-args>)
 
   nnoremap <silent> <leader>v <cmd>call PromptDebugEvaluate(expand('<cword>'))<CR>
   vnoremap <silent> <leader>v :<C-u>call PromptDebugEvaluate(<SID>GetRangeExpr())<CR>
@@ -1642,7 +1648,11 @@ function! s:RemotePid(host, proc)
 endfunction
 
 function! s:RemoteAttach(host, proc)
-  let pid = s:RemotePid(a:host, a:proc)
+  if a:proc =~ '^[0-9]\+$'
+    let pid = a:proc
+  else
+    let pid = s:RemotePid(a:host, a:proc)
+  endif
   if pid > 0
     let opts = #{ssh: a:host, proc: pid}
     call s:Debug(opts)
@@ -1660,7 +1670,7 @@ function! s:Sshfs(remote, args)
 endfunction
 
 function! s:Scp(remote)
-  let cmd = printf("scp %s %s:/tmp", expand("%:p"), a:remote)
+  let cmd = printf("rsync -pt %s %s:/tmp", expand("%:p"), a:remote)
   let ret = systemlist(cmd)
   if v:shell_error
     call s:ShowErrors(ret)
@@ -1674,10 +1684,6 @@ endfunction
 
 """"""""""""""""""""""""""""Building"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-let s:build_type = "Debug"
-let s:sdk = "p10"
-let s:sdk_dir = "/opt/aisys/obsidian_" .. s:sdk
-
 function s:ObsidianMake(...)
   let repo = FugitiveWorkTree()
   if empty(repo)
@@ -1996,7 +2002,7 @@ function! DropClients()
   endif
 endfunction
 
-function! UpdateDocker() abort
+function! UpdateDocker()
   sp ~/aidistro/bashrc
   call search('^p="\i*"')
   call setline('.', printf('p="%s"', s:sdk))
@@ -2015,7 +2021,6 @@ function! RunDocker() abort
   lcd ~/aidistro
   let cmds = ["sudo docker-compose build ubuntu22", "sudo docker-compose run ubuntu22"]
   call termopen(join(cmds, ";"))
-  " execute printf("autocmd WinClosed %d call InstallSdk(v:true)", win_getid())
   startinsert
 endfunction
 
