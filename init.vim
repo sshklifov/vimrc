@@ -133,32 +133,6 @@ cabbr Gb Git blame
 cabbr Gdt Git! difftool
 cabbr Gmt Git mergetool
 
-function! s:BranchName()
-  let dict = FugitiveExecute(["branch", "--show-current"])
-  if dict['exit_status'] != 0
-    return ''
-  endif
-  return dict['stdout'][0]
-endfunction
-
-function! s:BranchIssueNumber()
-  let branch = s:BranchName()
-  return matchstr(branch, 'SW-[0-9]\{4\}')
-endfunction
-
-function! s:OnNewCommit()
-  setlocal spell
-  setlocal tw=90
-  setlocal cc=91
-  let issue = s:BranchIssueNumber()
-  if empty(getline(1)) && !empty(issue)
-    call setline(1, issue .. ': ')
-    startinsert!
-  endif
-endfunction
-
-autocmd FileType gitcommit call s:OnNewCommit()
-
 " Capture <Esc> in termal mode
 tnoremap <Esc> <C-\><C-n>
 
@@ -394,6 +368,8 @@ xnoremap <silent> <leader>P :<C-W>set
 
 command! -nargs=0 -bar Retab set invexpandtab | retab!
 
+command! -nargs=0 Shada exe "tabnew " .. stdpath("state") .. "/shada/main.shada"
+
 function! s:GetWindows(pat, idx)
   let windows = flatten(map(gettabinfo(), "v:val.windows"))
   let win_names = map(windows, '[v:val, expand("#" . winbufnr(v:val) . ":t")]')
@@ -450,41 +426,6 @@ set pumheight=10
 inoremap {<CR> {<CR>}<C-o>O
 
 nmap <leader>sp :setlocal invspell<CR>
-
-func s:OpenStackTrace()
-  let dirs = GetRepos(v:false)
-  let lines = join(getline(1, '$'), "\n")
-  let lines = split(lines, '\(^#\)\|\(\n#\)')
-  let list = []
-  for line in lines
-    let m = matchlist(line, '^\([0-9]\+\).* at \([^:]\+\):\([0-9]\+\)')
-    if len(m) < 4
-      call add(list, #{text: '#'.line, valid: 0})
-    else
-      let level = m[1]
-      let file = m[2]
-      let line = m[3]
-      let resolved = v:false
-      for dir in dirs
-        let repo = fnamemodify(dir, ":t")
-        let resolved = substitute(file, "^.*" . repo, dir, "")
-        if filereadable(resolved)
-          call add(list, #{filename: resolved, lnum: line, text: level})
-          let resolved = v:true
-          break
-        endif
-      endfor
-      if !resolved
-        let text = printf("%s:%d", file, line)
-        call add(list, #{text: text, valid: 0})
-      endif
-    endif
-  endfor
-  call setqflist([], ' ', #{title: 'Stack', items: list})
-  copen
-endfunc
-
-command! -nargs=0 Crashtrace call s:OpenStackTrace()
 " }}}
 
 """"""""""""""""""""""""""""Git"""""""""""""""""""""""""""" {{{
@@ -992,7 +933,6 @@ function! s:UncompleteFiles()
 endfunction
 
 command! -nargs=0 Uncomplete call <SID>UncompleteFiles()
-
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
@@ -1156,7 +1096,7 @@ endfunction
 
 omap az <cmd>call <SID>FoldMotion()<CR>
 
-function! SearchOrStay(pat, flags)
+function! s:SearchOrStay(pat, flags)
   if getline('.') !~ a:pat
     call search(a:pat, a:flags)
   endif
@@ -1167,27 +1107,27 @@ function! s:OursOrTheirs()
     echo "Choose context to resolve!"
     return
   endif
-  call SearchOrStay('[<=>]\{7}', 'bW')
+  call s:SearchOrStay('[<=>]\{7}', 'bW')
 
   if getline('.') =~ '<\{7}'
     delete
-    call SearchOrStay('=\{7}', 'W')
+    call s:SearchOrStay('=\{7}', 'W')
     let firstline = line('.')
-    call SearchOrStay('>\{7}', 'W')
+    call s:SearchOrStay('>\{7}', 'W')
     let lastline = line('.')
     exe printf("%d,%ddelete", firstline, lastline)
   elseif getline('.') =~ '=\{7}'
     let lastline = line('.')
-    call SearchOrStay('<\{7}', 'bW')
+    call s:SearchOrStay('<\{7}', 'bW')
     let firstline = line('.')
     exe printf("%d,%ddelete", firstline, lastline)
-    call SearchOrStay('>\{7}', 'W')
+    call s:SearchOrStay('>\{7}', 'W')
     delete
   elseif getline('.') =~ '>\{7}'
     delete
-    call SearchOrStay('=\{7}', 'bW')
+    call s:SearchOrStay('=\{7}', 'bW')
     let lastline = line('.')
-    call SearchOrStay('<\{7}', 'bW')
+    call s:SearchOrStay('<\{7}', 'bW')
     let firstline = line('.')
     exe printf("%d,%ddelete", firstline, lastline)
   else
@@ -1196,6 +1136,41 @@ function! s:OursOrTheirs()
 endfunction
 
 command! -nargs=0 Resolve call s:OursOrTheirs()
+
+func s:OpenStackTrace()
+  let dirs = GetRepos(v:false)
+  let lines = join(getline(1, '$'), "\n")
+  let lines = split(lines, '\(^#\)\|\(\n#\)')
+  let list = []
+  for line in lines
+    let m = matchlist(line, '^\([0-9]\+\).* at \([^:]\+\):\([0-9]\+\)')
+    if len(m) < 4
+      call add(list, #{text: '#'.line, valid: 0})
+    else
+      let level = m[1]
+      let file = m[2]
+      let line = m[3]
+      let resolved = v:false
+      for dir in dirs
+        let repo = fnamemodify(dir, ":t")
+        let resolved = substitute(file, "^.*" . repo, dir, "")
+        if filereadable(resolved)
+          call add(list, #{filename: resolved, lnum: line, text: level})
+          let resolved = v:true
+          break
+        endif
+      endfor
+      if !resolved
+        let text = printf("%s:%d", file, line)
+        call add(list, #{text: text, valid: 0})
+      endif
+    endif
+  endfor
+  call setqflist([], ' ', #{title: 'Stack', items: list})
+  copen
+endfunc
+
+command! -nargs=0 Crashtrace call s:OpenStackTrace()
 "}}}
 
 """"""""""""""""""""""""""""Debugging"""""""""""""""""""""""""""" {{{
