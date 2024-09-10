@@ -44,8 +44,9 @@ if s:is_work_pc
   let g:build_type = "Debug"
   let g:sdk = "p10"
   let g:sdk_dir = "/opt/aisys/obsidian_" .. g:sdk
-  call plug#load('work')
-  call ChangeHost(g:host, v:false)
+  if plug#load('work')
+    call ChangeHost(g:host, v:false)
+  endif
 endif
 
 " sshklifov/debug
@@ -379,7 +380,7 @@ xnoremap <silent> <leader>P :<C-W>set
 
 command! -nargs=0 -bar Retab set invexpandtab | retab!
 
-command! -nargs=0 Shada exe "tabnew " .. stdpath("state") .. "/shada/main.shada"
+command! -nargs=0 Shada exe "tabnew " .. stdpath("state") .. "/shada/main.shada" | setlocal bufhidden=wipe
 
 function! s:GetWindows(pat, idx)
   let windows = flatten(map(gettabinfo(), "v:val.windows"))
@@ -884,7 +885,7 @@ command! -nargs=? -complete=customlist,BranchCompl Review call s:TryCall("s:Revi
 command! -nargs=0 D Review HEAD
 command! -nargs=0 R Review
 
-function! s:ReviewCompleteFiles(cmd_bang, arg) abort
+function! s:CompleteFiles(cmd_bang, arg) abort
   if !exists("g:review_stack")
     echo "Start a review first"
     return
@@ -926,9 +927,9 @@ function CompleteCompl(ArgLead, CmdLine, CursorPos)
   return SplitItems(g:review_stack[-1], a:ArgLead)
 endfunction
 
-command! -bang -nargs=? -complete=customlist,CompleteCompl Complete  call <SID>ReviewCompleteFiles('<bang>', <q-args>)
+command! -bang -nargs=? -complete=customlist,CompleteCompl Complete  call <SID>CompleteFiles('<bang>', <q-args>)
 
-function! s:ReviewPostponeFile()
+function! s:PostponeFile()
   if !exists("g:review_stack")
     echo "Start a review first"
     return
@@ -952,7 +953,7 @@ function! s:ReviewPostponeFile()
 endfunction
 
 nnoremap <silent> <leader>ok <cmd>Complete<CR>
-nnoremap <silent> <leader>nok <cmd>call <SID>ReviewPostponeFile()<CR>
+nnoremap <silent> <leader>nok <cmd>call <SID>PostponeFile()<CR>
 
 function! s:UncompleteFiles()
   if !exists("g:review_stack")
@@ -1225,13 +1226,13 @@ endfunction
 function! s:StartDebug(exe)
   let exe = empty(a:exe) ? "a.out" : a:exe
   let opts = {"exe": exe}
-  call s:Debug(opts)
+  call Debug(opts)
 endfunction
 
 function! s:RunDebug(exe)
   let exe = empty(a:exe) ? "a.out" : a:exe
   let opts = #{exe: exe, br: s:GetDebugLoc()}
-  call s:Debug(opts)
+  call Debug(opts)
 endfunction
 
 function! ExeCompl(ArgLead, CmdLine, CursorPos)
@@ -1256,7 +1257,7 @@ function! s:AttachDebug(proc)
     return
   endif
   let opts = #{proc: pids[0]}
-  call s:Debug(opts)
+  call Debug(opts)
 endfunction
 
 function! AttachCompl(ArgLead, CmdLine, CursorPos)
@@ -1276,9 +1277,11 @@ function! AttachCompl(ArgLead, CmdLine, CursorPos)
   return compl
 endfunction
 
-command! -nargs=? -complete=customlist,ExeCompl Start call s:StartDebug(<q-args>)
-command! -nargs=? -complete=customlist,ExeCompl Run call s:RunDebug(<q-args>)
-command! -nargs=1 -complete=customlist,AttachCompl Attach call s:AttachDebug(<q-args>)
+if !s:is_work_pc
+  command! -nargs=? -complete=customlist,ExeCompl Start call s:StartDebug(<q-args>)
+  command! -nargs=? -complete=customlist,ExeCompl Run call s:RunDebug(<q-args>)
+  command! -nargs=1 -complete=customlist,AttachCompl Attach call s:AttachDebug(<q-args>)
+endif
 
 " Available modes:
 " - exe. Pass executable + arguments
@@ -1288,7 +1291,7 @@ command! -nargs=1 -complete=customlist,AttachCompl Attach call s:AttachDebug(<q-
 " - symbols. Whether to load symbols or not. Used for faster loading of gdb.
 " - ssh. Launch GDB over ssh with the given address.
 " - br. Place a breakpoint at location and run inferior.
-function! s:Debug(args)
+function! Debug(args)
   let required = ['exe', 'proc', 'headless']
   let optional = ['symbols', 'ssh', 'user', 'br']
   let req_keys = filter(keys(a:args), "index(required, v:val) >= 0")
@@ -1646,7 +1649,7 @@ function! s:RemoteStart(host, exe)
   if !empty(a:exe)
     let debug_args['exe'] = a:exe
   endif
-  call s:Debug(debug_args)
+  call Debug(debug_args)
 endfunction
 
 function! s:RemoteRun(host, exe)
@@ -1654,7 +1657,7 @@ function! s:RemoteRun(host, exe)
   if !empty(a:exe)
     let debug_args['exe'] = a:exe
   endif
-  call s:Debug(debug_args)
+  call Debug(debug_args)
 endfunction
 
 function! s:RemotePid(host, proc)
@@ -1677,7 +1680,7 @@ function! s:RemoteAttach(host, proc)
   endif
   if pid > 0
     let opts = #{ssh: a:host, proc: pid}
-    call s:Debug(opts)
+    call Debug(opts)
   endif
 endfunction
 
