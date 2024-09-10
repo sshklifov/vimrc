@@ -737,6 +737,17 @@ endfunction
 
 command! -nargs=0 Pull call s:UpdateBranch()
 
+function! s:PushBranch()
+  let dict = FugitiveExecute(["push", "origin", "HEAD"])
+  if dict['exit_status'] != 0
+    return s:ShowErrors(dict['stderr'])
+  else
+    echo "Up to date with origin."
+  endif
+endfunction
+
+command! -nargs=0 Push call s:PushBranch()
+
 function! OriginCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
