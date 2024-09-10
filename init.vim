@@ -284,13 +284,23 @@ function! GetProgressStatusLine(...)
 endfunction
 
 function! BranchStatusLine()
-  let res = FugitiveStatusline()
-  if empty(res)
-    return res
+  let want_status = empty(bufname()) || filereadable(bufname())
+  if !want_status
+    return ""
   endif
-  let res = substitute(res, "\\[Git(", "", "")
-  let res = substitute(res, ")\\]", "", "")
-  return res .. ">"
+  let dict = FugitiveExecute(["rev-parse", "--abbrev-ref", "HEAD"])
+  if dict['exit_status'] != 0
+    return ""
+  endif
+  let ref = dict['stdout'][0]
+  if ref == "HEAD"
+    let dict = FugitiveExecute(["rev-parse", "HEAD"])
+    if dict['exit_status'] != 0
+      return ""
+    endif
+    let ref = dict['stdout'][0][0:10]
+  endif
+  return ref .. ">"
 endfunction
 
 function! HostStatusLine()
@@ -762,6 +772,28 @@ function! ReflogCompl(ArgLead, CmdLine, CursorPos)
   return filter(refs, "stridx(v:val, a:ArgLead) >= 0")
 endfunction
 
+function! s:DanglingCommits()
+  let refs = s:RecentRefs(100)
+  call filter(refs, 'v:val =~# "^\\x*$"')
+
+  tabnew Dangling commits
+  setlocal buftype=nofile
+  setlocal bufhidden=wipe
+  call setline(1, refs)
+  setlocal nomodified
+  setlocal nomodifiable
+
+  nnoremap <silent> <buffer> <CR> :call <SID>VisitCommit()<CR>
+endfunction
+
+function! s:VisitCommit()
+  let ns = nvim_create_namespace('dangling_commits')
+  call nvim_buf_set_extmark(bufnr(), ns, line('.') - 1, 0, #{line_hl_group: "Conceal"})
+  exe "G log " .. getline(".")
+endfunction
+
+command! -nargs=0 Dangle call s:DanglingCommits()
+
 function! s:MasterOrThrow()
   let branches = s:GetRefs(['refs/remotes'], 'ma')
   if index(branches, 'origin/obsidian-master') >= 0
@@ -782,7 +814,6 @@ function! s:HashOrThrow(commitish)
   endif
   return dict['stdout'][0]
 endfunction
-
 
 function! s:CommonParentOrThrow(branch, main)
   let range = printf("%s..%s", a:main, a:branch)
@@ -849,6 +880,7 @@ endfunction
 command! -nargs=? -complete=customlist,BranchCompl Review call s:TryCall("s:Review", <q-args>)
 
 command! -nargs=0 D Review HEAD
+command! -nargs=0 R Review
 
 function! s:ReviewCompleteFiles(cmd_bang, arg) abort
   if !exists("g:review_stack")
