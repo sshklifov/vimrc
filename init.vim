@@ -333,6 +333,7 @@ function s:ShowHighlights()
   call map(hls, "split(v:val, '\\s')[0]")
   tabnew
   setlocal buftype=nofile
+  setlocal bufhidden=wipe
   call appendbufline(bufnr(), 0, 'List of highlights in vim:')
   let ns = nvim_create_namespace("")
   for hl in hls
@@ -689,6 +690,7 @@ function! s:ShowErrors(errors)
   let errors = map(a:errors, "strtrans(v:val)")
   bot new
   setlocal buftype=nofile
+  setlocal bufhidden=wipe
   if empty(errors)
     call setline(1, "<No errors to show>")
   else
