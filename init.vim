@@ -64,7 +64,7 @@ endif
 
 " sshklifov/debug
 let g:promptdebug_commands = 0
-let g:promptdebug_program_output = 0
+let g:promptdebug_program_output = 1
 
 " Tabulous
 let tabulousLabelLeftStr = ' ['
@@ -371,7 +371,7 @@ command! -nargs=0 ChooseHighlight call s:ShowHighlights()
 """"""""""""""""""""""""""""IDE maps"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-function s:GetSessionFile()
+function! s:GetSessionFile()
   let repo = fnamemodify(FugitiveWorkTree(), ':t')
   let branch = init#BranchName()
   if !empty(branch) && !empty(repo)
@@ -380,22 +380,47 @@ function s:GetSessionFile()
   else
     let session_file = "default_session.vim"
   endif
-  return stdpath('data') .. '/sessions/' .. session_file
+  return session_file
 endfunction
 
-function s:SaveSession()
-  let file = s:GetSessionFile()
-  exe "mksession! " .. file
+function! s:SaveSession(basename)
+  let fullname = s:session_directory .. "/" .. a:basename
+  exe "mksession! " .. fullname
+  echo fullname
 endfunction
 
-function s:ShowSessions(pat)
+nnoremap <silent> <leader><leader>q :call <SID>SaveSession(<SID>GetSessionFile())<CR>
+
+command! -nargs=1 -complete=customlist,SaveCompl Save call s:SaveSession(<q-args>)
+
+function! SaveCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  let sessions = s:GetSessions()
+  call map(sessions, 'fnamemodify(v:val, ":t")')
+  call filter(sessions, 'stridx(v:val, a:ArgLead) >= 0')
+  return sessions
+endfunction
+
+function! s:GetSessions()
   let dir = stdpath('data') .. '/sessions'
   let session_files = systemlist(['find', dir, '-type', 'f'])
+  let Comparator = {lhs, rhs -> getftime(rhs) - getftime(lhs)}
+  call sort(session_files, Comparator)
   if v:shell_error
-    call init#ShowErrors(session_files)
+    return []
+  else
+    return session_files
+  endif
+endfunction
+
+function! s:ShowSessions(pat)
+  let session_files = s:GetSessions()
+  if empty(session_files)
+    echo "Nothing to show."
     return
   endif
-  call filter(session_files, 'stridx(v:val, a:pat) >= 0')
 
   let nr = init#CreateCustomBuffer('Sessions', session_files)
   bot sp
@@ -405,14 +430,14 @@ function s:ShowSessions(pat)
   nnoremap <buffer> <CR> :call <SID>SelectSession()<CR>
 endfunction
 
-function s:SelectSession()
+function! s:SelectSession()
   let file = getline('.')
   exe "so " .. file
 endfunction
 
-command! -nargs=? Sessions call s:ShowSessions(<q-args>)
+command! -nargs=0 Load call s:ShowSessions('')
 
-nnoremap <silent> <leader>so :call <SID>ShowSessions('')<CR>
+nnoremap <silent> <leader>so :exe "so " .. <SID>GetSessions()[0]<CR>
 
 set sessionoptions=buffers,curdir,help,tabpages,winsize
 
