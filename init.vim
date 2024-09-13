@@ -58,7 +58,7 @@ if s:is_work_pc
   let g:sdk = "p10"
   let g:sdk_dir = "/opt/aisys/obsidian_" .. g:sdk
   if plug#load('work')
-    call ChangeHost(g:host, v:false)
+    call ChangeHostNoMessage(g:host, v:false)
   endif
 endif
 
@@ -295,6 +295,14 @@ function! GetProgressStatusLine(...)
     endif
   endfor
   return ''
+endfunction
+
+function! init#BranchName()
+  let dict = FugitiveExecute(["branch", "--show-current"])
+  if dict['exit_status'] != 0
+    return ''
+  endif
+  return dict['stdout'][0]
 endfunction
 
 function! BranchStatusLine()
@@ -680,7 +688,7 @@ function UntrackedCompl(ArgLead, CmdLine, CursorPos)
   return s:GetUntracked(bang)->TailItems(a:ArgLead)
 endfunction
 
-function! s:WorkTreeCleanOrThrow()
+function! init#WorkTreeCleanOrThrow()
   let dict = FugitiveExecute(["status", "--porcelain"])
   if dict['exit_status'] != 0
     throw "Not inside repo"
@@ -690,7 +698,7 @@ function! s:WorkTreeCleanOrThrow()
   endif
 endfunction
 
-function! s:CheckedBranchOrThrow()
+function! init#CheckedBranchOrThrow()
   let dict = FugitiveExecute(["rev-parse", "--abbrev-ref", "HEAD"])
   if dict['exit_status'] != 0
     throw "Not inside repo"
@@ -698,7 +706,7 @@ function! s:CheckedBranchOrThrow()
   return dict['stdout'][0]
 endfunction
 
-function s:TryCall(what, ...)
+function init#TryCall(what, ...)
   let Partial = function(a:what, a:000)
   try
     call Partial()
@@ -707,15 +715,17 @@ function s:TryCall(what, ...)
   endtry
 endfunction
 
-function! s:SwitchToBranch(arg)
-  call s:WorkTreeCleanOrThrow()
+function! init#SwitchToBranchOrThrow(arg, make)
+  call init#WorkTreeCleanOrThrow()
 
   let dict = FugitiveExecute(["checkout", a:arg])
   if dict['exit_status'] != 0
     throw "Failed to checkout " . a:arg
   endif
   " Rebuild for an up-to-date version of compile_commands.json
-  exe "Make!"
+  if a:make
+    exe "Make!"
+  endif
 endfunction
 
 function! s:GetRefs(ref_dirs, arg)
@@ -730,7 +740,8 @@ function! s:GetRefs(ref_dirs, arg)
   return result
 endfunction
 
-command! -nargs=1 -complete=customlist,BranchCompl Branch call s:TryCall("s:SwitchToBranch", <q-args>)
+command! -nargs=1 -bang -complete=customlist,BranchCompl Branch
+      \ call init#TryCall("init#SwitchToBranchOrThrow", <q-args>, <bang>1)
 
 function! BranchCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -739,7 +750,8 @@ function! BranchCompl(ArgLead, CmdLine, CursorPos)
   return s:GetRefs(['refs/heads', 'refs/tags'], a:ArgLead)
 endfunction
 
-command! -nargs=1 -complete=customlist,OriginCompl Origin call s:TryCall("s:SwitchToBranch", <q-args>)
+command! -nargs=1 -bang -complete=customlist,OriginCompl Origin
+      \ call init#TryCall("init#SwitchToBranchOrThrow", <q-args>, <bang>1)
 
 function! init#ShowErrors(errors)
   let errors = map(a:errors, "strtrans(v:val)")
@@ -827,7 +839,9 @@ function! s:RecentRefs(max_refs)
   return refs
 endfunction
 
-command -nargs=1 -complete=customlist,ReflogCompl Reflog call s:TryCall("s:SwitchToBranch", <q-args>)
+command -nargs=1 -bang -complete=customlist,ReflogCompl Reflog
+      \ call init#TryCall("init#SwitchToBranchOrThrow", <q-args>, <bang>1)
+
 cabbr Ref Reference
 
 function! ReflogCompl(ArgLead, CmdLine, CursorPos)
@@ -868,7 +882,7 @@ endfunction
 
 command! -nargs=0 Dangle call s:DanglingCommits()
 
-function! s:MasterOrThrow()
+function! init#MasterOrThrow()
   let branches = s:GetRefs(['refs/remotes'], 'ma')
   if index(branches, 'origin/obsidian-master') >= 0
     return 'origin/obsidian-master'
@@ -881,7 +895,7 @@ function! s:MasterOrThrow()
   endif
 endfunction
 
-function! s:HashOrThrow(commitish)
+function! init#HashOrThrow(commitish)
   let dict = FugitiveExecute(["rev-parse", a:commitish])
   if dict['exit_status'] != 0
     throw "Failed to parse HEAD"
@@ -889,7 +903,7 @@ function! s:HashOrThrow(commitish)
   return dict['stdout'][0]
 endfunction
 
-function! s:CommonParentOrThrow(branch, main)
+function! init#CommonParentOrThrow(branch, main)
   let range = printf("%s..%s", a:main, a:branch)
   let dict = FugitiveExecute(["log", range, "--pretty=format:%H"])
   if dict['exit_status'] != 0
@@ -909,13 +923,13 @@ function! s:CommonParentOrThrow(branch, main)
   return common
 endfunction
 
-function! s:RefExistsOrThrow(commit)
+function! init#RefExistsOrThrow(commit)
   if FugitiveExecute(["show", a:commit])['exit_status'] != 0
     throw "Unknown ref to git: " . a:commit
   endif
 endfunction
 
-function! s:InsideGitOrThrow()
+function! init#InsideGitOrThrow()
   if FugitiveExecute(["status"])['exit_status'] != 0
     throw "Not inside repo"
   endif
@@ -930,12 +944,12 @@ function! s:Review(arg)
     return
   endif
 
-  call s:InsideGitOrThrow()
+  call init#InsideGitOrThrow()
   " Determine main branch
-  let head = s:HashOrThrow("HEAD")
-  let mainline = empty(a:arg) ? s:MasterOrThrow() : a:arg
-  call s:RefExistsOrThrow(mainline)
-  let bpoint = s:CommonParentOrThrow(head, mainline)
+  let head = init#HashOrThrow("HEAD")
+  let mainline = empty(a:arg) ? init#MasterOrThrow() : a:arg
+  call init#RefExistsOrThrow(mainline)
+  let bpoint = init#CommonParentOrThrow(head, mainline)
   " Load files for review.
   " If possible, make the diff windows editable by not passing a ref to fugitive
   if get(a:, "arg", "") == "HEAD"
@@ -951,7 +965,7 @@ function! s:Review(arg)
   let g:review_stack = [getqflist()]
 endfunction
 
-command! -nargs=? -complete=customlist,BranchCompl Review call s:TryCall("s:Review", <q-args>)
+command! -nargs=? -complete=customlist,BranchCompl Review call init#TryCall("s:Review", <q-args>)
 
 command! -nargs=0 D Review HEAD
 command! -nargs=0 R Review
@@ -1297,13 +1311,13 @@ endfunction
 function! s:StartDebug(exe)
   let exe = empty(a:exe) ? "a.out" : a:exe
   let opts = {"exe": exe}
-  call Debug(opts)
+  call init#Debug(opts)
 endfunction
 
 function! s:RunDebug(exe)
   let exe = empty(a:exe) ? "a.out" : a:exe
-  let opts = #{exe: exe, br: s:GetDebugLoc()}
-  call Debug(opts)
+  let opts = #{exe: exe, br: init#GetDebugLoc()}
+  call init#Debug(opts)
 endfunction
 
 function! ExeCompl(ArgLead, CmdLine, CursorPos)
@@ -1328,7 +1342,7 @@ function! s:AttachDebug(proc)
     return
   endif
   let opts = #{proc: pids[0]}
-  call Debug(opts)
+  call init#Debug(opts)
 endfunction
 
 function! AttachCompl(ArgLead, CmdLine, CursorPos)
@@ -1362,7 +1376,7 @@ endif
 " - symbols. Whether to load symbols or not. Used for faster loading of gdb.
 " - ssh. Launch GDB over ssh with the given address.
 " - br. Place a breakpoint at location and run inferior.
-function! Debug(args)
+function! init#Debug(args)
   let required = ['exe', 'proc', 'headless']
   let optional = ['symbols', 'ssh', 'user', 'br']
   let req_keys = filter(keys(a:args), "index(required, v:val) >= 0")
@@ -1417,11 +1431,11 @@ function! s:DebugStartPost(args)
   command! -nargs=? Break call PromptDebugGoToBreakpoint(<q-args>)
 
   nnoremap <silent> <leader>v <cmd>call PromptDebugEvaluate(expand('<cword>'))<CR>
-  vnoremap <silent> <leader>v :<C-u>call PromptDebugEvaluate(<SID>GetRangeExpr())<CR>
+  vnoremap <silent> <leader>v :<C-u>call PromptDebugEvaluate(init#GetRangeExpr())<CR>
 
-  nnoremap <silent> <leader>br :call PromptDebugSendCommand("br " . <SID>GetDebugLoc())<CR>
-  nnoremap <silent> <leader>tbr :call PromptDebugSendCommand("tbr " . <SID>GetDebugLoc())<CR>
-  nnoremap <silent> <leader>unt :call PromptDebugSendCommands("tbr " . <SID>GetDebugLoc(), "c")<CR>
+  nnoremap <silent> <leader>br :call PromptDebugSendCommand("br " . init#GetDebugLoc())<CR>
+  nnoremap <silent> <leader>tbr :call PromptDebugSendCommand("tbr " . init#GetDebugLoc())<CR>
+  nnoremap <silent> <leader>unt :call PromptDebugSendCommands("tbr " . init#GetDebugLoc(), "c")<CR>
   nnoremap <silent> <leader>pc :call PromptDebugGoToPC()<CR>
 
   call PromptDebugSendCommand("set debug-file-directory /dev/null")
@@ -1492,13 +1506,13 @@ function! s:DebugStopPost()
   highlight LspReferenceText guibg=#51576e gui=underline
 endfunction
 
-function! s:GetDebugLoc()
+function! init#GetDebugLoc()
   let basename = expand("%:t")
   let lnum = line(".")
   return printf("%s:%d", basename, lnum)
 endfunction
 
-function! s:GetRangeExpr()
+function! init#GetRangeExpr()
   let [lnum1, col1] = getpos("'<")[1:2]
   let [lnum2, col2] = getpos("'>")[1:2]
 
@@ -1715,23 +1729,23 @@ command! -nargs=0 Instances call <SID>Instances()
 
 """"""""""""""""""""""""""""Remote"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-function! s:RemoteStart(host, exe)
+function! init#RemoteStart(host, exe)
   let debug_args = #{ssh: a:host}
   if !empty(a:exe)
     let debug_args['exe'] = a:exe
   endif
-  call Debug(debug_args)
+  call init#Debug(debug_args)
 endfunction
 
-function! s:RemoteRun(host, exe)
-  let debug_args = #{ssh: a:host, br: s:GetDebugLoc()}
+function! init#RemoteRun(host, exe)
+  let debug_args = #{ssh: a:host, br: init#GetDebugLoc()}
   if !empty(a:exe)
     let debug_args['exe'] = a:exe
   endif
-  call Debug(debug_args)
+  call init#Debug(debug_args)
 endfunction
 
-function! s:RemotePid(host, proc)
+function! init#RemotePid(host, proc)
   let pid = systemlist(["ssh", "-o", "ConnectTimeout=1", a:host, "pgrep " . a:proc])
   if len(pid) > 1
     echo "Multiple instances of " . a:proc
@@ -1743,33 +1757,33 @@ function! s:RemotePid(host, proc)
   return pid[0]
 endfunction
 
-function! s:RemoteAttach(host, proc)
+function! init#RemoteAttach(host, proc)
   if a:proc =~ '^[0-9]\+$'
     let pid = a:proc
   else
-    let pid = s:RemotePid(a:host, a:proc)
+    let pid = init#RemotePid(a:host, a:proc)
   endif
   if pid > 0
     let opts = #{ssh: a:host, proc: pid}
-    call Debug(opts)
+    call init#Debug(opts)
   endif
 endfunction
 
-function! s:SshTerm(remote)
+function! init#SshTerm(remote)
   tabnew
   startinsert
   let id = termopen(["ssh", a:remote])
 endfunction
 
-function! s:Sshfs(remote, args)
+function! init#Sshfs(remote, args)
   silent exe "tabnew scp://" . a:remote . "/" . a:args
 endfunction
 
-function! s:Scp(remote)
+function! init#Scp(remote)
   let cmd = printf("rsync -pt %s %s:/tmp", expand("%:p"), a:remote)
   let ret = systemlist(cmd)
   if v:shell_error
-    call s:ShowErrors(ret)
+    call init#ShowErrors(ret)
   else
     echo "Copied to /tmp."
   endif
