@@ -26,6 +26,19 @@ if !isdirectory(s:plug_directory)
   finish
 endif
 
+let s:session_directory = stdpath('data') .. "/sessions"
+if !isdirectory(s:session_directory)
+  if input("Sessions directory does not exist. Do you want to create it (y/n)? ") == "y"
+    let output = systemlist('mkdir ' .. s:session_directory)
+    if v:shell_error
+      call init#ShowErorrs(output)
+      finish
+    endif
+  else
+    finish
+  endif
+endif
+
 " Redefine the group, avoids having the same autocommands twice
 augroup VimStartup
 au!
@@ -350,8 +363,49 @@ command! -nargs=0 ChooseHighlight call s:ShowHighlights()
 """"""""""""""""""""""""""""IDE maps"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-nnoremap <leader><leader>q :mksession! ~/.local/share/nvim/session.vim<CR>
-nnoremap <leader>so :so ~/.local/share/nvim/session.vim<CR>
+function s:GetSessionFile()
+  let repo = fnamemodify(FugitiveWorkTree(), ':t')
+  let branch = init#BranchName()
+  if !empty(branch) && !empty(repo)
+    let branch = substitute(branch, '/', '.', 'g')
+    let session_file = printf('%s.%s.vim', repo, branch)
+  else
+    let session_file = "default_session.vim"
+  endif
+  return stdpath('data') .. '/sessions/' .. session_file
+endfunction
+
+function s:SaveSession()
+  let file = s:GetSessionFile()
+  exe "mksession! " .. file
+endfunction
+
+function s:ShowSessions(pat)
+  let dir = stdpath('data') .. '/sessions'
+  let session_files = systemlist(['find', dir, '-type', 'f'])
+  if v:shell_error
+    call init#ShowErrors(session_files)
+    return
+  endif
+  call filter(session_files, 'stridx(v:val, a:pat) >= 0')
+
+  let nr = init#CreateCustomBuffer('Sessions', session_files)
+  bot sp
+  resize 10
+  exe "b " .. nr
+  setlocal cursorline
+  nnoremap <buffer> <CR> :call <SID>SelectSession()<CR>
+endfunction
+
+function s:SelectSession()
+  let file = getline('.')
+  exe "so " .. file
+endfunction
+
+command! -nargs=? Sessions call s:ShowSessions(<q-args>)
+
+nnoremap <silent> <leader>so :call <SID>ShowSessions('')<CR>
+
 set sessionoptions=buffers,curdir,help,tabpages,winsize
 
 nnoremap <silent> cd :lcd %:p:h<CR>
@@ -687,17 +741,15 @@ endfunction
 
 command! -nargs=1 -complete=customlist,OriginCompl Origin call s:TryCall("s:SwitchToBranch", <q-args>)
 
-function! s:ShowErrors(errors)
+function! init#ShowErrors(errors)
   let errors = map(a:errors, "strtrans(v:val)")
-  bot new
-  setlocal buftype=nofile
-  setlocal bufhidden=wipe
   if empty(errors)
-    call setline(1, "<No errors to show>")
-  else
-    call setline(1, errors[0])
-    call append(1, errors[1:])
+    let errors = ["<No errors to show>"]
   endif
+
+  let nr = init#CreateCustomBuffer('Errors', errors)
+  bot sp
+  exe "b " .. nr
 endfunction
 
 function! s:UpdateBranch()
@@ -711,14 +763,14 @@ function! s:UpdateBranch()
   let args = ["fetch", "origin", branch]
   let dict = FugitiveExecute(args)
   if dict['exit_status'] != 0
-    return s:ShowErrors(dict['stderr'])
+    return init#ShowErrors(dict['stderr'])
   endif
 
   const range = printf("%s..origin/%s", branch, branch)
   let args = ["log", "--pretty=format:%h", range]
   let dict = FugitiveExecute(args)
   if dict['exit_status'] != 0
-    return s:ShowErrors(dict['stderr'])
+    return init#ShowErrors(dict['stderr'])
   endif
   const commits = filter(dict['stdout'], "!empty(v:val)")
 
@@ -730,7 +782,7 @@ function! s:UpdateBranch()
   let args = ["merge", "origin/" .. branch]
   let dict = FugitiveExecute(args)
   if dict['exit_status'] != 0
-    return s:ShowErrors(dict['stderr'])
+    return init#ShowErrors(dict['stderr'])
   endif
   exe printf("G log -n %d %s", len(commits), commits[0])
 endfunction
@@ -740,7 +792,7 @@ command! -nargs=0 Pull call s:UpdateBranch()
 function! s:PushBranch()
   let dict = FugitiveExecute(["push", "origin", "HEAD"])
   if dict['exit_status'] != 0
-    return s:ShowErrors(dict['stderr'])
+    return init#ShowErrors(dict['stderr'])
   else
     echo "Up to date with origin."
   endif
@@ -786,16 +838,24 @@ function! ReflogCompl(ArgLead, CmdLine, CursorPos)
   return filter(refs, "stridx(v:val, a:ArgLead) >= 0")
 endfunction
 
+function! init#CreateCustomBuffer(name, lines)
+  let nr = bufadd(a:name)
+  call setbufvar(nr, '&buftype', 'nofile')
+  call setbufvar(nr, '&bufhidden', 'wipe')
+  call bufload(nr)
+  call setbufline(nr, 1, a:lines)
+  call setbufvar(nr, '&modified', v:false)
+  call setbufvar(nr, '&modifiable', v:false)
+  return nr
+endfunction
+
 function! s:DanglingCommits()
   let refs = s:RecentRefs(100)
   call filter(refs, 'v:val =~# "^\\x*$"')
 
-  tabnew Dangling commits
-  setlocal buftype=nofile
-  setlocal bufhidden=wipe
-  call setline(1, refs)
-  setlocal nomodified
-  setlocal nomodifiable
+  let nr = init#CreateCustomBuffer('Dangling commits', refs)
+  tab sp
+  exe "b " .. nr
 
   nnoremap <silent> <buffer> <CR> :call <SID>VisitCommit()<CR>
 endfunction
