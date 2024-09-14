@@ -28,13 +28,9 @@ endif
 
 let s:session_directory = stdpath('data') .. "/sessions"
 if !isdirectory(s:session_directory)
-  if input("Sessions directory does not exist. Do you want to create it (y/n)? ") == "y"
-    let output = systemlist('mkdir ' .. s:session_directory)
-    if v:shell_error
-      call init#ShowErorrs(output)
-      finish
-    endif
-  else
+  let output = systemlist('mkdir ' .. s:session_directory)
+  if v:shell_error
+    call init#ShowErorrs(output)
     finish
   endif
 endif
