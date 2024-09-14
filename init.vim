@@ -1075,6 +1075,30 @@ function! s:UncompleteFiles()
 endfunction
 
 command! -nargs=0 Uncomplete call <SID>UncompleteFiles()
+
+function! s:TryCheckTodo()
+  call init#InsideGitOrThrow()
+  " Determine main branch
+  let head = init#HashOrThrow("HEAD")
+  let mainline = init#MasterOrThrow()
+  call init#RefExistsOrThrow(mainline)
+  let bpoint = init#CommonParentOrThrow(head, mainline)
+  " Get changes
+  let dict = FugitiveExecute(['diff', bpoint, '--unified=0'])
+  if dict['exit_status'] != 0
+    throw "Failed to load diff with " .. bpoint
+  endif
+  let todos = filter(dict['stdout'], 'stridx(v:val, "TODO") >= 0')
+  if empty(todos)
+    echo "Congratulations, no TODOS."
+  else
+    let nr = init#CreateCustomBuffer('TODOs', todos)
+    bot sp
+    exe "b " .. nr
+  endif
+endfunction
+
+command! -nargs=0 Todo call init#TryCall('s:TryCheckTodo')
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
