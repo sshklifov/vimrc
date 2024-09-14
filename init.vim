@@ -28,9 +28,9 @@ endif
 
 let s:session_directory = stdpath('data') .. "/sessions"
 if !isdirectory(s:session_directory)
-  let output = systemlist('mkdir ' .. s:session_directory)
+  call systemlist('mkdir ' .. s:session_directory)
   if v:shell_error
-    call init#ShowErorrs(output)
+    echo "Failed to initialize sessions directory."
     finish
   endif
 endif
@@ -157,9 +157,10 @@ set hlsearch
 nnoremap <silent> <Space> :nohlsearch<cr>
 
 " Typos
-command! -bang Q q<bang>
-command! -bang W w<bang>
-command! -bang Qa qa<bang>
+cabbr Q q
+cabbr W w
+cabbr Qa qa
+cabbr Tab tab
 
 " Annoying quirks
 set updatecount=0
@@ -1312,6 +1313,27 @@ func s:OpenStackTrace()
 endfunc
 
 command! -nargs=0 Crashtrace call s:OpenStackTrace()
+
+function! init#HistFind(...)
+  " XXX becuase of E464 this is mostly ok
+  let f_list = []
+  for cmd_prefix in a:000
+    call add(f_list, printf('stridx(v:val, "%s") == 0', cmd_prefix))
+  endfor
+  let f_str = join(f_list, ' || ')
+
+  let hist = map(range(1, histnr(':')), 'histget(":", v:val)')
+  return reverse(filter(hist, f_str))
+endfunction
+
+function! HistoryCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  let prefix = len(a:CmdLine) - len(a:ArgLead)
+  let result = init#HistFind(a:CmdLine)
+  return map(result, 'v:val[prefix:]')
+endfunction
 "}}}
 
 """"""""""""""""""""""""""""Debugging"""""""""""""""""""""""""""" {{{
