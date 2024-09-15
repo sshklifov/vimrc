@@ -283,7 +283,12 @@ let g:statusline_dict = #{}
 " Must register modules here. When multiple modules have progress output, items at the front of the
 " list will take precedence
 let g:statusline_prio = ['sync', 'make', 'lsp']
-call dictwatcheradd(g:statusline_dict, '*', {d, k, z -> execute('redrawstatus')})
+
+function! OnStatusDictChange(...)
+  redrawstatus
+endfunction
+
+call dictwatcheradd(g:statusline_dict, '*', 'OnStatusDictChange')
 
 function! GetProgressStatusLine(...)
   for key in g:statusline_prio
@@ -1813,6 +1818,47 @@ function! s:Instances()
 endfunction
 
 command! -nargs=0 Instances call <SID>Instances()
+
+function! s:Index()
+  let files = s:GetSource() + s:GetHeader()
+  for file in files
+    let nr = bufadd(file)
+    call bufload(nr)
+  endfor
+endfunction
+
+command! -nargs=0 Index call s:Index()
+
+let g:lsp_status = #{}
+
+function! UpdateLspStatus(key, value)
+  if has_key(g:lsp_status, a:key) && g:lsp_status[a:key] == a:value
+    " no diff
+    return
+  endif
+  let g:lsp_status[a:key] = a:value
+  let values = values(g:lsp_status)
+  let total = len(values)
+  if total == 0
+    return
+  endif
+  call filter(values, 'v:val == "idle"')
+  let idle = len(values)
+  let percent = idle * 100 / total
+  let g:statusline_dict['lsp'] = percent .. '%'
+  
+  if percent == 100
+    let s:lsp_status_timer = timer_start(1000, 's:StopFileStatus')
+  elseif exists('s:lsp_status_timer')
+    call timer_stop(s:lsp_status_timer)
+    unlet s:lsp_status_timer
+  endif
+endfunction
+
+function! s:StopFileStatus(timer) 
+  let g:statusline_dict['lsp'] = ''
+  unlet s:lsp_status_timer
+endfunction
 "}}}
 
 """"""""""""""""""""""""""""Remote"""""""""""""""""""""""""""" {{{
