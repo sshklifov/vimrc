@@ -925,13 +925,18 @@ function! init#HashOrThrow(commitish)
   return dict['stdout'][0]
 endfunction
 
-function! init#CommonParentOrThrow(branch, main)
+function! init#BranchCommitsOrThrow(branch, main)
   let range = printf("%s..%s", a:main, a:branch)
   let dict = FugitiveExecute(["log", range, "--pretty=format:%H"])
   if dict['exit_status'] != 0
     throw "Revision range failed"
   endif
-  let branch_first = dict['stdout'][-1]
+  return dict['stdout']
+endfunction
+
+function! init#CommonParentOrThrow(branch, main)
+  let range = init#BranchCommitsOrThrow(a:branch, a:main)
+  let branch_first = range[-1]
   if empty(branch_first)
     " 'branch' and 'main' are the same commits
     return a:main
@@ -1076,29 +1081,45 @@ endfunction
 
 command! -nargs=0 Uncomplete call <SID>UncompleteFiles()
 
-function! s:TryCheckTodo()
+function! s:Pickaxe(keyword)
   call init#InsideGitOrThrow()
-  " Determine main branch
+  " Determine branch.
   let head = init#HashOrThrow("HEAD")
   let mainline = init#MasterOrThrow()
-  call init#RefExistsOrThrow(mainline)
-  let bpoint = init#CommonParentOrThrow(head, mainline)
-  " Get changes
-  let dict = FugitiveExecute(['diff', bpoint, '--unified=0'])
+  let commits = init#BranchCommitsOrThrow(head, mainline)
+  let bpoint = "HEAD~" .. len(commits)
+  " Get changed files.
+  let dict = FugitiveExecute(["diff", bpoint, "--name-only"])
   if dict['exit_status'] != 0
-    throw "Failed to load diff with " .. bpoint
+    throw "Collecting changed filed failed"
   endif
-  let todos = filter(dict['stdout'], 'stridx(v:val, "TODO") >= 0')
-  if empty(todos)
-    echo "Congratulations, no TODOS."
-  else
-    let nr = init#CreateCustomBuffer('TODOs', todos)
-    bot sp
-    exe "b " .. nr
-  endif
+  let files = dict['stdout']
+  call map(files, 'FugitiveFind(v:val)')
+  " Run git bame on each file
+  let output = []
+  for file in files
+    " Add a revision range to speed up search
+    let rev_range = bpoint .. ".."
+    let dict = FugitiveExecute(["blame", rev_range, "-p", "--", file])
+    if dict['exit_status'] != 0
+      " File might have been deleted
+      continue
+    endif
+    let blame = dict['stdout']
+    for idx in range(len(blame))
+      if blame[idx] =~# '^\x\{40\}' && stridx(blame[idx+1], a:keyword) >= 0
+        let [_, commit, orig_lnum, lnum; _] = matchlist(blame[idx], '\(\x*\) \(\d*\) \(\d*\)')
+        if index(commits, commit) >= 0
+          call add(output, #{filename: file, lnum: lnum, text: blame[idx+1][1:]})
+        endif
+      endif
+    endfor
+  endfor
+  call DisplayInQf(output, 'Pickaxe')
 endfunction
 
-command! -nargs=0 Todo call init#TryCall('s:TryCheckTodo')
+command! -nargs=0 Todo call s:Pickaxe('TODO')
+command! -nargs=* Pickaxe call s:Pickaxe(<q-args>)
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
