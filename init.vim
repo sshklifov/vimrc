@@ -1637,45 +1637,6 @@ highlight! link @lsp.typemod.function.defaultLibrary Function
 
 lua require('lsp')
 
-function! s:UpdateLspProgress() 
-  let serverResponses = luaeval('vim.lsp.util.get_progress_messages()')
-  if empty(serverResponses)
-    let g:statusline_dict.lsp = ''
-    return
-  endif
-
-  function! GetServerProgress(_, status)
-    if !has_key(a:status, 'message')
-      return [0, 0]
-    endif
-    let msg = a:status['message']
-    let partFiles = split(msg, "/")
-    if len(partFiles) != 2
-      return [0, 0]
-    endif
-    return [str2nr(partFiles[0]), str2nr(partFiles[1])]
-  endfunction
-
-  let serverProgress = map(serverResponses, funcref("GetServerProgress"))
-
-  let totalFiles = 0
-  let totalDone = 0
-  for progress in serverProgress
-    let totalDone += progress[0]
-    let totalFiles += progress[1]
-  endfor
-
-  if totalFiles == 0
-    let g:statusline_dict.lsp = ''
-    return
-  endif
-
-  let percentage = (100 * totalDone) / totalFiles
-  let g:statusline_dict.lsp = percentage . "%"
-endfunction
-
-autocmd User LspProgressUpdate call <SID>UpdateLspProgress()
-
 command! -nargs=* Find call QuickFind(getcwd(), "-regex", ".*" .. <q-args> .. ".*")
 
 command! -nargs=+ Grepo call QuickGrep(<q-args>, FugitiveWorkTree())
@@ -1755,10 +1716,6 @@ function! TypeHierarchyHandler(res, encoding)
   endif
 endfunction
 
-function! SwitchSourceHeaderHandler(res)
-  exe "edit " . v:lua.vim.uri_to_fname(a:res)
-endfunction
-
 function! ReferenceContainerHandler(res)
   let items = map(a:res, "#{
         \ filename: v:lua.vim.uri_to_fname(v:val.uri),
@@ -1780,13 +1737,11 @@ function! s:LspRequestSync(buf, method, params)
   return resp[0].result
 endfunction
 
-function! SymbolInfo()
+function! s:SymbolInfo()
   let params = v:lua.vim.lsp.util.make_position_params()
   let resp = s:LspRequestSync(0, 'textDocument/symbolInfo', params)
   return resp[0]
 endfunction
-
-command! -nargs=0 Info echo SymbolInfo()
 
 function! s:Instances()
   let params = v:lua.vim.lsp.util.make_position_params()
@@ -1795,7 +1750,7 @@ function! s:Instances()
     echo "No response"
     return
   endif
-  let info = SymbolInfo()
+  let info = s:SymbolInfo()
   let excludeContainer = get(info, "containerName", "") . info.name
 
   let items = []
