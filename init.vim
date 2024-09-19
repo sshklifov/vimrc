@@ -48,10 +48,10 @@ exe printf("autocmd BufWritePost %s source %s", s:this_file_path, s:this_file_pa
 " sshklifov/work
 let s:is_work_pc = isdirectory("/opt/aisys")
 if s:is_work_pc
-  let g:default_host = "p10"
-  let g:host = "p10"
+  let g:default_host = "max_p15"
+  let g:host = g:default_host
   let g:build_type = "Debug"
-  let g:sdk = "p10"
+  let g:sdk = "p15"
   let g:sdk_dir = "/opt/aisys/obsidian_" .. g:sdk
   if plug#load('work')
     call ChangeHostNoMessage(g:host, v:false)
@@ -1092,9 +1092,10 @@ function! s:Pickaxe(keyword)
   let head = init#HashOrThrow("HEAD")
   let mainline = init#MasterOrThrow()
   let commits = init#BranchCommitsOrThrow(head, mainline)
-  let bpoint = "HEAD~" .. len(commits)
+  " Add a fake commit for unstanged changes
+  call add(commits, "0000000000000000000000000000000000000000")
   " Get changed files.
-  let dict = FugitiveExecute(["diff", bpoint, "--name-only"])
+  let dict = FugitiveExecute(["diff", "HEAD~" .. len(commits), "--name-only"])
   if dict['exit_status'] != 0
     throw "Collecting changed filed failed"
   endif
@@ -1103,9 +1104,7 @@ function! s:Pickaxe(keyword)
   " Run git bame on each file
   let output = []
   for file in files
-    " Add a revision range to speed up search
-    let rev_range = bpoint .. ".."
-    let dict = FugitiveExecute(["blame", rev_range, "-p", "--", file])
+    let dict = FugitiveExecute(["blame", "-p", "--", file])
     if dict['exit_status'] != 0
       " File might have been deleted
       continue
@@ -1819,12 +1818,16 @@ endfunction
 
 command! -nargs=0 Instances call <SID>Instances()
 
+let s:enable_lsp_status = v:false
+let s:lsp_status_timer = -1
+
 function! s:Index()
   let files = s:GetSource() + s:GetHeader()
   for file in files
     let nr = bufadd(file)
     call bufload(nr)
   endfor
+  let s:enable_lsp_status = v:true
 endfunction
 
 command! -nargs=0 Index call s:Index()
@@ -1832,8 +1835,7 @@ command! -nargs=0 Index call s:Index()
 let g:lsp_status = #{}
 
 function! UpdateLspStatus(key, value)
-  if has_key(g:lsp_status, a:key) && g:lsp_status[a:key] == a:value
-    " no diff
+  if !s:enable_lsp_status
     return
   endif
   let g:lsp_status[a:key] = a:value
@@ -1848,16 +1850,9 @@ function! UpdateLspStatus(key, value)
   let g:statusline_dict['lsp'] = percent .. '%'
   
   if percent == 100
-    let s:lsp_status_timer = timer_start(1000, 's:StopFileStatus')
-  elseif exists('s:lsp_status_timer')
-    call timer_stop(s:lsp_status_timer)
-    unlet s:lsp_status_timer
+    let g:statusline_dict['lsp'] = ''
+    let s:enable_lsp_status = v:false
   endif
-endfunction
-
-function! s:StopFileStatus(timer) 
-  let g:statusline_dict['lsp'] = ''
-  unlet s:lsp_status_timer
 endfunction
 "}}}
 

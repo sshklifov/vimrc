@@ -6,6 +6,11 @@ local uv = vim.uv
 
 -- Clangd extensions
 
+vim.lsp.handlers["textDocument/clangd.fileStatus"] = function(_, res, _, _)
+  local file = vim.uri_to_fname(res.uri)
+  vim.fn.UpdateLspStatus(file, res.state)
+end
+
 local RequestBaseClass = function()
   local params = vim.lsp.util.make_position_params()
   params.resolve = 1
@@ -158,8 +163,7 @@ end
 lspconfig.clangd.setup {
   on_attach = OnCclsAttach,
   init_options = {
-    -- Trash, don't try it again
-    clangdFileStatus = false
+    clangdFileStatus = true
   },
   capabilities = {
     textDocument = {
