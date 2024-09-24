@@ -45,6 +45,9 @@ exe printf("autocmd BufWritePost %s source %s", s:this_file_path, s:this_file_pa
 """"""""""""""""""""""""""""Plugin settings"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
+" This script
+let g:auto_index_whitelist = ["obsidian-video", "libalcatraz"]
+
 " sshklifov/work
 let s:is_work_pc = isdirectory("/opt/aisys")
 if s:is_work_pc
@@ -1329,7 +1332,7 @@ endfunction
 command! -nargs=0 Resolve call s:OursOrTheirs()
 
 func s:OpenStackTrace()
-  let dirs = GetRepos(v:false)
+  let dirs = GetRepos()
   let lines = join(getline(1, '$'), "\n")
   let lines = split(lines, '\(^#\)\|\(\n#\)')
   let list = []
@@ -1641,8 +1644,11 @@ command! -nargs=* Find call QuickFind(getcwd(), "-regex", ".*" .. <q-args> .. ".
 
 command! -nargs=+ Grepo call QuickGrep(<q-args>, FugitiveWorkTree())
 
-function! s:GetSource()
-  let dir = FugitiveWorkTree()
+function! s:GetSource(...)
+  let dir = get(a:000, 0, '')
+  if empty(dir)
+    let dir = FugitiveWorkTree()
+  endif
   if !isdirectory(dir)
     return []
   endif
@@ -1660,8 +1666,11 @@ endfunction
 
 command! -nargs=? -complete=customlist,SourceCompl Source call s:GetSource()->FileFilter(<q-args>)->DropInQf('Source')
 
-function! s:GetHeader()
-  let dir = FugitiveWorkTree()
+function! s:GetHeader(...)
+  let dir = get(a:000, 0, '')
+  if empty(dir)
+    let dir = FugitiveWorkTree()
+  endif
   if !isdirectory(dir)
     return []
   endif
@@ -1773,40 +1782,65 @@ endfunction
 
 command! -nargs=0 Instances call <SID>Instances()
 
-let s:enable_lsp_status = v:false
-let s:lsp_status_timer = -1
+let s:lsp_files_to_index = []
 
-function! s:Index()
-  let files = s:GetSource() + s:GetHeader()
+function! s:Index(wt)
+  " Disable recursive trigger
+  augroup VimStartup
+    autocmd! BufReadPost
+  augroup END
+
+  let files = s:GetSource(a:wt) + s:GetHeader(a:wt)
   for file in files
+    call add(s:lsp_files_to_index, file)
     let nr = bufadd(file)
     call bufload(nr)
   endfor
-  let s:enable_lsp_status = v:true
+
+  " Reinstall autocmd
+  augroup VimStartup
+    autocmd! BufReadPost * call s:AutoIndex()
+  augroup END
 endfunction
 
-command! -nargs=0 Index call s:Index()
+function! s:AutoIndex()
+  let wt = FugitiveWorkTree()
+  if !isdirectory(wt)
+    return
+  endif
+  if index(g:auto_index_whitelist, fnamemodify(wt, ':t')) < 0
+    return
+  endif
+  if !has_key(g:lsp_status, expand("%:p"))
+    echo "Indexing..."
+    call timer_start(10, {_ -> s:Index(wt)})
+  endif
+endfunction
+
+autocmd! BufReadPost * call s:AutoIndex()
 
 let g:lsp_status = #{}
 
 function! UpdateLspStatus(key, value)
-  if !s:enable_lsp_status
+  if empty(s:lsp_files_to_index)
     return
   endif
   let g:lsp_status[a:key] = a:value
-  let values = values(g:lsp_status)
-  let total = len(values)
-  if total == 0
-    return
-  endif
-  call filter(values, 'v:val == "idle"')
-  let idle = len(values)
-  let percent = idle * 100 / total
+
+  let total = len(s:lsp_files_to_index)
+  let indexed = 0
+  for file in s:lsp_files_to_index
+    if get(g:lsp_status, file, "") == "idle"
+      let indexed += 1
+    endif
+  endfor
+  let percent = indexed * 100 / total
   let g:statusline_dict['lsp'] = percent .. '%'
   
   if percent == 100
+    echo "Index complete!"
     let g:statusline_dict['lsp'] = ''
-    let s:enable_lsp_status = v:false
+    let s:lsp_files_to_index = []
   endif
 endfunction
 "}}}
