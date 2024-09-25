@@ -1785,39 +1785,15 @@ command! -nargs=0 Instances call <SID>Instances()
 let s:lsp_files_to_index = []
 
 function! s:Index(wt)
-  " Disable recursive trigger
-  augroup VimStartup
-    autocmd! BufReadPost
-  augroup END
-
   let files = s:GetSource(a:wt) + s:GetHeader(a:wt)
   for file in files
     call add(s:lsp_files_to_index, file)
     let nr = bufadd(file)
     call bufload(nr)
   endfor
-
-  " Reinstall autocmd
-  augroup VimStartup
-    autocmd! BufReadPost * call s:AutoIndex()
-  augroup END
 endfunction
 
-function! s:AutoIndex()
-  let wt = FugitiveWorkTree()
-  if !isdirectory(wt)
-    return
-  endif
-  if index(g:auto_index_whitelist, fnamemodify(wt, ':t')) < 0
-    return
-  endif
-  if !has_key(g:lsp_status, expand("%:p"))
-    echo "Indexing..."
-    call timer_start(10, {_ -> s:Index(wt)})
-  endif
-endfunction
-
-autocmd! BufReadPost * call s:AutoIndex()
+command! -nargs=0 Index call s:Index(FugitiveWorkTree())
 
 let g:lsp_status = #{}
 
