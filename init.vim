@@ -1113,14 +1113,21 @@ function! s:Pickaxe(keyword)
       continue
     endif
     let blame = dict['stdout']
-    for idx in range(len(blame))
-      if blame[idx] =~# '^\x\{40\}' && stridx(blame[idx+1], a:keyword) >= 0
+    let idx = 0
+    while idx < len(blame)
+      if blame[idx] =~# '^\x\{40\}'
         let [_, commit, orig_lnum, lnum; _] = matchlist(blame[idx], '\(\x*\) \(\d*\) \(\d*\)')
         if index(commits, commit) >= 0
-          call add(output, #{filename: file, lnum: lnum, text: blame[idx+1][1:]})
+          while blame[idx][0] != "\t"
+            let idx += 1
+          endwhile
+          if stridx(blame[idx], a:keyword) >= 0
+            call add(output, #{filename: file, lnum: lnum, text: blame[idx][1:]})
+          endif
         endif
       endif
-    endfor
+      let idx += 1
+    endwhile
   endfor
   call DisplayInQf(output, 'Pickaxe')
 endfunction
