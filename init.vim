@@ -929,7 +929,7 @@ endfunction
 function! init#HashOrThrow(commitish)
   let dict = FugitiveExecute(["rev-parse", a:commitish])
   if dict['exit_status'] != 0
-    throw "Failed to parse HEAD"
+    throw "Failed to parse " .. a:commitish
   endif
   return dict['stdout'][0]
 endfunction
@@ -1133,8 +1133,8 @@ function! s:Pickaxe(keyword)
   call DisplayInQf(output, 'Pickaxe')
 endfunction
 
-command! -nargs=0 Todo call s:Pickaxe('TODO')
-command! -nargs=* Pickaxe call s:Pickaxe(<q-args>)
+command! -nargs=0 Todo call init#TryCall('s:Pickaxe', 'TODO')
+command! -nargs=* Pickaxe call init#TryCall('s:Pickaxe', <q-args>)
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
@@ -1161,7 +1161,7 @@ function! s:NextItem(dir)
   if (a:dir == "next" && idx < size) ||
         \ (a:dir == "prev" && idx > 1) ||
         \ (a:dir == "first" || a:dir == "last")
-    copen
+    " copen
     silent! exe cmd
   endif
 endfunction
