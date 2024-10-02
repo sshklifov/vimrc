@@ -878,8 +878,9 @@ function! ReflogCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  let refs = s:RecentRefs(20)
-  return filter(refs, "stridx(v:val, a:ArgLead) >= 0")
+  let refs = s:RecentRefs(30)
+  call filter(refs, "stridx(v:val, a:ArgLead) >= 0")
+  return refs[1:]
 endfunction
 
 function! init#CreateCustomBuffer(name, lines)
