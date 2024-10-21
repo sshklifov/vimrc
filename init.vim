@@ -130,11 +130,24 @@ set diffopt+=vertical
 
 """"""""""""""""""""""""""""Everything else"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function s:ScriptLocalVars()
+  tabnew
+  setlocal buftype=nofile
+  setlocal bufhidden=wipe
+  call appendbufline(bufnr(), 0, 'Script local variables:')
+  for var in keys(s:)
+    let msg = printf("%s = %s", var, s:[var])
+    call append('$', msg)
+  endfor
+endfunction
+
+command! -nargs=0 Vars call s:ScriptLocalVars()
 
 " Open vimrc quick (muy importante)
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
 nnoremap <silent> <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
 nnoremap <silent> <leader>dv :e ~/.local/share/nvim/plugged/debug/plugin/promptdebug.vim<CR>
+nnoremap <silent> <leader>wv :e ~/.local/share/nvim/plugged/work/plugin/work.vim<CR>
 
 " Indentation settings
 set expandtab
@@ -228,10 +241,14 @@ set fillchars+=vert:\|
 set list
 set lcs=tab:\|\ 
 
-function! GetFileStatusLine()
-  " Kind of resticts maximum returned length
-  const maxwidth = 80
+" Kind of resticts maximum returned length
+if !exists('s:status_toggle')
+  let s:status_max = 70
+endif
 
+command! -nargs=1 Statusline let s:status_max = <f-args>
+
+function! GetFileStatusLine()
   " Return basename for help files
   if &ft == "help"
     return expand("%:t")
@@ -252,13 +269,13 @@ function! GetFileStatusLine()
 
   " Dir is not substring of file -> Display file only
   if !mixedStatus
-    return s:PathShorten(filename, maxwidth)
+    return s:PathShorten(filename, s:status_max)
   endif
 
   " Display mixed status
   let filename = filename[len(cwd)+1:]
   const sep = "> "
-  return s:PathShorten(cwd . sep . filename, maxwidth)
+  return s:PathShorten(cwd . sep . filename, s:status_max)
 endfunction
 
 function! s:PathShorten(file, maxwidth)
@@ -331,20 +348,36 @@ function! BranchStatusLine()
     endif
     let ref = dict['stdout'][0][0:10]
   endif
-  return ref .. ">"
+  return ref .. '>'
 endfunction
 
 function! HostStatusLine()
-  if exists('g:host') && g:host != g:default_host
-    return "(" .. g:host .. ")"
+  if empty(FugitiveWorkTree())
+    return ''
+  endif
+  if exists('g:HOST') && g:HOST != s:default_host
+    return "(" .. g:HOST .. ")"
    else
      return ''
    endif
 endfunction
 
+function! BuildStatusLine()
+  if empty(FugitiveWorkTree())
+    return ''
+  endif
+  let build_type = get(g:, 'BUILD_TYPE', '')
+  if build_type == "Release"
+    return "(Release)"
+  elseif build_type == "Debug"
+    return "(Debug)"
+  else
+    return ''
+  endif
+endfunction
+
 set statusline=
-set statusline+=
-set statusline+=%(%{HostStatusLine()}\ %)
+set statusline+=%(%{HostStatusLine()}%{%BuildStatusLine()%}\ %)
 set statusline+=%(%{BranchStatusLine()}\ %)
 set statusline+=%(%{GetFileStatusLine()}\ %{GetProgressStatusLine()}%m%h%r%)
 set statusline+=%=
@@ -534,6 +567,13 @@ set pumheight=10
 inoremap {<CR> {<CR>}<C-o>O
 
 nmap <leader>sp :setlocal invspell<CR>
+" }}}
+
+""""""""""""""""""""""""""""RSI"""""""""""""""""""""""""""" {{{
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+" TODO?!
+
 " }}}
 
 """"""""""""""""""""""""""""Git"""""""""""""""""""""""""""" {{{
