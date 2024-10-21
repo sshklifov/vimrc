@@ -17,7 +17,11 @@ Plug 'ojroques/nvim-osc52'
 Plug 'sshklifov/debug'
 Plug 'sshklifov/qsearch'
 Plug 'sshklifov/qutil'
-Plug 'sshklifov/work', { 'on': [] }
+
+let s:is_work_pc = isdirectory("/opt/aisys")
+if s:is_work_pc
+  Plug 'sshklifov/work'
+endif
 
 call plug#end()
 
@@ -49,16 +53,16 @@ exe printf("autocmd BufWritePost %s source %s", s:this_file_path, s:this_file_pa
 let g:auto_index_whitelist = ["obsidian-video", "libalcatraz"]
 
 " sshklifov/work
-let s:is_work_pc = isdirectory("/opt/aisys")
 if s:is_work_pc
-  let g:default_host = "max_p15"
-  let g:host = g:default_host
-  let g:build_type = "Debug"
-  let g:sdk = "p15"
-  let g:sdk_dir = "/opt/aisys/obsidian_" .. g:sdk
-  if plug#load('work')
-    call ChangeHostNoMessage(g:host, v:false)
+  let s:default_host = "max_p15"
+  if !exists('g:HOST')
+    let g:HOST = s:default_host
+    let g:DEVICE = "p15"
   endif
+  if !exists('g:BUILD_TYPE')
+    let g:BUILD_TYPE = "Debug"
+  endif
+  call plug#load('work')
 endif
 
 " sshklifov/debug
