@@ -783,7 +783,7 @@ endfunction
 function init#TryCall(what, ...)
   let Partial = function(a:what, a:000)
   try
-    call Partial()
+    return Partial()
   catch
     echo v:exception
   endtry
@@ -875,8 +875,12 @@ endfunction
 
 command! -nargs=0 Pull call s:UpdateBranch()
 
-function! s:PushBranch()
-  let dict = FugitiveExecute(["push", "origin", "HEAD"])
+function! s:PushBranch(force)
+  if a:force
+    let dict = FugitiveExecute(["push", "--force", "origin", "HEAD"])
+  else
+    let dict = FugitiveExecute(["push", "origin", "HEAD"])
+  endif
   if dict['exit_status'] != 0
     return init#ShowErrors(dict['stderr'])
   else
@@ -884,7 +888,7 @@ function! s:PushBranch()
   endif
 endfunction
 
-command! -nargs=0 Push call s:PushBranch()
+command! -nargs=0 -bang Push call s:PushBranch(<bang>0)
 
 function! OriginCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -1834,20 +1838,26 @@ endfunction
 
 command! -nargs=0 Instances call <SID>Instances()
 
-let s:lsp_files_to_index = []
+if !exists('s:lsp_files_to_index')
+  let s:lsp_files_to_index = #{}
+endif
 
 function! s:Index(wt)
   let files = s:GetSource(a:wt) + s:GetHeader(a:wt)
   for file in files
-    call add(s:lsp_files_to_index, file)
-    let nr = bufadd(file)
-    call bufload(nr)
+    if !has_key(g:lsp_status, file)
+      let s:lsp_files_to_index[file] = 1
+      let nr = bufadd(file)
+      call bufload(nr)
+    endif
   endfor
 endfunction
 
 command! -nargs=0 Index call s:Index(FugitiveWorkTree())
 
-let g:lsp_status = #{}
+if !exists('g:lsp_status')
+  let g:lsp_status = #{}
+endif
 
 function! UpdateLspStatus(key, value)
   if empty(s:lsp_files_to_index)
@@ -1855,20 +1865,19 @@ function! UpdateLspStatus(key, value)
   endif
   let g:lsp_status[a:key] = a:value
 
+  if a:value == "idle"
+    let s:lsp_files_to_index[a:key] = 0
+  endif
   let total = len(s:lsp_files_to_index)
-  let indexed = 0
-  for file in s:lsp_files_to_index
-    if get(g:lsp_status, file, "") == "idle"
-      let indexed += 1
-    endif
-  endfor
+  let indexed = len(filter(copy(s:lsp_files_to_index), 'v:val == 0'))
   let percent = indexed * 100 / total
   let g:statusline_dict['lsp'] = percent .. '%'
   
-  if percent == 100
+  if indexed == total
     echo "Index complete!"
     let g:statusline_dict['lsp'] = ''
-    let s:lsp_files_to_index = []
+    let s:lsp_files_to_index = #{}
+    redrawstatus
   endif
 endfunction
 "}}}
