@@ -876,6 +876,7 @@ endfunction
 command! -nargs=0 Pull call s:UpdateBranch()
 
 function! s:PushBranch(force)
+  call init#WorkTreeCleanOrThrow()
   if a:force
     let dict = FugitiveExecute(["push", "--force", "origin", "HEAD"])
   else
