@@ -431,6 +431,24 @@ command! -nargs=0 ChooseHighlight call s:ShowHighlights()
 """"""""""""""""""""""""""""IDE maps"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
+function! s:ShowHistory(CmdLine)
+  let result = init#HistFind(a:CmdLine)
+  let nr = init#CreateCustomBuffer('History', result)
+  bot sp
+  resize 10
+  exe "b " .. nr
+  setlocal cursorline
+  nnoremap <silent> <buffer> <CR> :call <SID>SelectCommand()<CR>
+endfunction
+
+function! s:SelectCommand()
+  let command = getline('.')
+  quit
+  exe command
+endfunction
+
+command! -nargs=* History call s:ShowHistory(<q-args>)
+
 function! s:GetSessionFile()
   let repo = fnamemodify(FugitiveWorkTree(), ':t')
   let branch = init#BranchName()
