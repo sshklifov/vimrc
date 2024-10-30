@@ -17,6 +17,7 @@ Plug 'ojroques/nvim-osc52'
 Plug 'sshklifov/debug'
 Plug 'sshklifov/qsearch'
 Plug 'sshklifov/qutil'
+Plug 'sshklifov/rsi'
 
 let s:is_work_pc = isdirectory("/opt/aisys")
 if s:is_work_pc
@@ -64,6 +65,10 @@ if s:is_work_pc
   endif
   call plug#load('work')
 endif
+
+" sshklifov/rsi
+command! -nargs=0 Rest call RsiEnterRest()
+command! -nargs=0 Rsi call RsiPrintStats()
 
 " sshklifov/debug
 let g:promptdebug_commands = 0
@@ -130,6 +135,19 @@ set diffopt+=vertical
 
 """"""""""""""""""""""""""""Everything else"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function init#Sum(...)
+  if a:0 == 1 && type(a:1) == v:t_list
+    let items = a:1
+  else
+    let items = a:000
+  endif
+    let res = 0
+    for x in items
+      let res += x
+    endfor
+    return res
+endfunction
+
 function s:ScriptLocalVars()
   tabnew
   setlocal buftype=nofile
@@ -306,7 +324,7 @@ endfunction
 let g:statusline_dict = #{}
 " Must register modules here. When multiple modules have progress output, items at the front of the
 " list will take precedence
-let g:statusline_prio = ['sync', 'make', 'lsp']
+let g:statusline_prio = ['sync', 'make', 'lsp', 'rsi']
 
 function! OnStatusDictChange(...)
   redrawstatus
@@ -469,7 +487,7 @@ function! s:ShowSessions(pat)
   resize 10
   exe "b " .. nr
   setlocal cursorline
-  nnoremap <buffer> <CR> :call <SID>SelectSession()<CR>
+  nnoremap <silent> <buffer> <CR> :call <SID>SelectSession()<CR>
 endfunction
 
 function! s:SelectSession()
@@ -567,13 +585,6 @@ set pumheight=10
 inoremap {<CR> {<CR>}<C-o>O
 
 nmap <leader>sp :setlocal invspell<CR>
-" }}}
-
-""""""""""""""""""""""""""""RSI"""""""""""""""""""""""""""" {{{
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-" TODO?!
-
 " }}}
 
 """"""""""""""""""""""""""""Git"""""""""""""""""""""""""""" {{{
@@ -1388,7 +1399,7 @@ endfunction
 
 command! -nargs=0 Resolve call s:OursOrTheirs()
 
-func s:OpenStackTrace()
+function s:OpenStackTrace()
   let dirs = GetRepos()
   let lines = join(getline(1, '$'), "\n")
   let lines = split(lines, '\(^#\)\|\(\n#\)')
@@ -1419,7 +1430,7 @@ func s:OpenStackTrace()
   endfor
   call setqflist([], ' ', #{title: 'Stack', items: list})
   copen
-endfunc
+endfunction
 
 command! -nargs=0 Crashtrace call s:OpenStackTrace()
 
