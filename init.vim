@@ -335,7 +335,7 @@ call dictwatcheradd(g:statusline_dict, '*', 'OnStatusDictChange')
 function! GetProgressStatusLine(...)
   for key in g:statusline_prio
     if has_key(g:statusline_dict, key) && !empty(g:statusline_dict[key])
-      return g:statusline_dict[key]
+      return g:statusline_dict[key] .. ' '
     endif
   endfor
   return ''
@@ -525,6 +525,7 @@ nnoremap <silent> gcd :Gcd<CR>
 nnoremap <silent> <leader>ta :tabnew<CR><C-O>
 nnoremap <silent> <leader>tA :-tabnew<CR><C-O>
 nnoremap <silent> <leader>tc :tabclose<CR>
+nnoremap <silent> <leader>on :only<CR>
 
 nnoremap <silent> <leader>unix :set ff=unix<CR>
 nnoremap <silent> <leader>dos :set ff=dos<CR>
@@ -818,17 +819,14 @@ function init#TryCall(what, ...)
   endtry
 endfunction
 
-function! init#SwitchToBranchOrThrow(arg, make)
+function! init#SwitchToBranchOrThrow(arg)
   call init#WorkTreeCleanOrThrow()
 
   let dict = FugitiveExecute(["checkout", a:arg])
   if dict['exit_status'] != 0
     throw "Failed to checkout " . a:arg
   endif
-  " Rebuild for an up-to-date version of compile_commands.json
-  if a:make
-    exe "Make!"
-  endif
+  call FugitiveExecute(["submodule", "update", "--init", "--recursive"])
 endfunction
 
 function! s:GetRefs(ref_dirs, arg)
@@ -843,8 +841,34 @@ function! s:GetRefs(ref_dirs, arg)
   return result
 endfunction
 
-command! -nargs=1 -bang -complete=customlist,BranchCompl Branch
-      \ call init#TryCall("init#SwitchToBranchOrThrow", <q-args>, <bang>1)
+function! s:OpenBranchBuffer()
+  let dict = FugitiveExecute(["for-each-ref", "--sort=-committerdate", "refs/heads/", "--format=%(refname:short)"])
+  if dict['exit_status'] != 0
+    return init#ShowErrors(dict['stderr'])
+  endif
+  let branches = filter(dict['stdout'], '!empty(v:val)')
+  let nr = init#CreateCustomBuffer('Branches', branches)
+  bot sp
+  resize 10
+  exe "b " .. nr
+  nnoremap <silent> <buffer> <CR> :call <SID>SelectBranch()<CR>
+endfunction
+
+function! s:SelectBranch()
+  let branch = getline('.')
+  quit
+  call init#TryCall("init#SwitchToBranchOrThrow", branch)
+endfunction
+
+function s:Branch(args)
+  if empty(a:args)
+    call s:OpenBranchBuffer()
+  else
+    call init#TryCall("init#SwitchToBranchOrThrow", a:args)
+  endif
+endfunction
+
+command! -nargs=? -complete=customlist,BranchCompl Branch call s:Branch(<q-args>)
 
 function! BranchCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
@@ -854,7 +878,7 @@ function! BranchCompl(ArgLead, CmdLine, CursorPos)
 endfunction
 
 command! -nargs=1 -bang -complete=customlist,OriginCompl Origin
-      \ call init#TryCall("init#SwitchToBranchOrThrow", <q-args>, <bang>1)
+      \ call init#TryCall("init#SwitchToBranchOrThrow", <q-args>)
 
 function! init#ShowErrors(errors)
   let errors = map(a:errors, "strtrans(v:val)")
@@ -948,7 +972,7 @@ function! s:RecentRefs(max_refs)
 endfunction
 
 command -nargs=1 -bang -complete=customlist,ReflogCompl Reflog
-      \ call init#TryCall("init#SwitchToBranchOrThrow", <q-args>, <bang>1)
+      \ call init#TryCall("init#SwitchToBranchOrThrow", <q-args>)
 
 cabbr Ref Reference
 
