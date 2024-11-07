@@ -937,9 +937,13 @@ function! s:PushBranch(force)
   endif
   if dict['exit_status'] != 0
     return init#ShowErrors(dict['stderr'])
-  else
-    echo "Up to date with origin."
+  elseif s:is_work_pc
+    let issue = work#BranchIssueNumber()
+    if !empty(issue)
+      return work#OpenJira(issue)
+    endif
   endif
+  echo "Up to date with origin."
 endfunction
 
 command! -nargs=0 -bang Push call s:PushBranch(<bang>0)
