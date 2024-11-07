@@ -1911,7 +1911,7 @@ function! s:Index(wt)
   endfor
 endfunction
 
-command! -nargs=0 Index call s:Index(FugitiveWorkTree())
+command! -nargs=? -complete=dir Index call s:Index(empty(<q-args>) ? FugitiveWorkTree() : fnamemodify(<q-args>, ":p"))
 
 if !exists('g:lsp_status')
   let g:lsp_status = #{}
