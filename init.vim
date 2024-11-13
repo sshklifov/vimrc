@@ -433,12 +433,7 @@ command! -nargs=0 ChooseHighlight call s:ShowHighlights()
 
 function! s:ShowHistory(CmdLine)
   let result = init#HistFind(a:CmdLine)
-  let nr = init#CreateCustomBuffer('History', result)
-  bot sp
-  resize 10
-  exe "b " .. nr
-  setlocal cursorline
-  nnoremap <silent> <buffer> <CR> :call <SID>SelectCommand()<CR>
+  call init#CreateCustomQuickfix('History', result, 's:SelectCommand')
 endfunction
 
 function! s:SelectCommand()
@@ -499,13 +494,7 @@ function! s:ShowSessions(pat)
     echo "Nothing to show."
     return
   endif
-
-  let nr = init#CreateCustomBuffer('Sessions', session_files)
-  bot sp
-  resize 10
-  exe "b " .. nr
-  setlocal cursorline
-  nnoremap <silent> <buffer> <CR> :call <SID>SelectSession()<CR>
+  call init#CreateCustomQuickfix('Sessions', session_files, 's:SelectSession')
 endfunction
 
 function! s:SelectSession()
@@ -847,11 +836,7 @@ function! s:OpenBranchBuffer()
     return init#ShowErrors(dict['stderr'])
   endif
   let branches = filter(dict['stdout'], '!empty(v:val)')
-  let nr = init#CreateCustomBuffer('Branches', branches)
-  bot sp
-  resize 10
-  exe "b " .. nr
-  nnoremap <silent> <buffer> <CR> :call <SID>SelectBranch()<CR>
+  call init#CreateCustomQuickfix('Branches', branches, 's:SelectBranch')
 endfunction
 
 function! s:SelectBranch()
@@ -1000,15 +985,19 @@ function! init#CreateCustomBuffer(name, lines)
   return nr
 endfunction
 
+function! init#CreateCustomQuickfix(name, lines, cb)
+  let nr = init#CreateCustomBuffer('History', a:lines)
+  bot sp
+  resize 10
+  exe "b " .. nr
+  setlocal cursorline
+  exe "nnoremap <silent> <buffer> <CR> :call " .. a:cb .. "()<CR>"
+endfunction
+
 function! s:DanglingCommits()
   let refs = s:RecentRefs(100)
   call filter(refs, 'v:val =~# "^\\x*$"')
-
-  let nr = init#CreateCustomBuffer('Dangling commits', refs)
-  tab sp
-  exe "b " .. nr
-
-  nnoremap <silent> <buffer> <CR> :call <SID>VisitCommit()<CR>
+  call init#CreateCustomQuickfix('Dangling commits', refs, 's:VisitCommit')
 endfunction
 
 function! s:VisitCommit()
