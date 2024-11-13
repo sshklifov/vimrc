@@ -1369,7 +1369,15 @@ function! s:EditFugitive()
 endfunction
 
 nnoremap <silent> <leader>fug :call <SID>EditFugitive()<CR>
-nnoremap <silent> <leader>com <cmd> exe "Gedit " .. split(FugitiveParse()[0], ":")[0]<CR>
+
+function! s:FugitiveCommit()
+  " return split(FugitiveParse()[0], ":")[0]
+  return FugitiveParse()[0]
+endfunction
+
+nnoremap <silent> <leader>com <cmd> exe "Gedit " .. <SID>FugitiveCommit()<CR>
+
+" TODO init#SwitchToBranchOrThrow with FugitiveCommit?
 
 function! s:Context(reverse)
   call search('^\(@@ .* @@\|[<=>|]\{7}[<=>|]\@!\)', a:reverse ? 'bW' : 'W')
