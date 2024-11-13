@@ -160,6 +160,8 @@ local OnCclsAttach = function(_, bufnr)
   buf_set_keymap('i', '<C-space>', '<cmd>lua ShowAutoCompletion({force_pum=true})<CR>', {noremap=true})
 end
 
+-- C++ LSP Config
+
 lspconfig.clangd.setup {
   on_attach = OnCclsAttach,
   init_options = {
@@ -174,6 +176,38 @@ lspconfig.clangd.setup {
   },
   filetypes = { 'c', 'cpp' }
 }
+
+-- Python LSP Config
+
+local OnPythonAttach = function(_, bufnr)
+  local function buf_set_keymap(...) api.nvim_buf_set_keymap(bufnr, ...) end
+  local function buf_set_option(name, value) api.nvim_set_option_value(name, value, {buf = bufnr}) end
+
+  -- Enable completion triggered by <c-x><c-o>
+  buf_set_option('omnifunc', 'v:lua.vim.lsp.omnifunc')
+
+  -- Mappings
+  local opts = { noremap=true, silent=true }
+
+  buf_set_keymap('i', '<C-Space>', '<C-X><C-O>', opts)
+  buf_set_keymap('n', 'gd', '<cmd>lua vim.lsp.buf.definition()<CR>', opts)
+  buf_set_keymap('n', 'K', '<cmd>lua vim.lsp.buf.hover()<CR>', opts)
+  buf_set_keymap('i', '<C-k>', '<cmd>lua vim.lsp.buf.signature_help()<CR>', opts)
+  buf_set_keymap('n', '<leader>rn', '<cmd>lua vim.lsp.buf.rename()<CR>', opts)
+
+  buf_set_keymap('n', '<leader>sym', '<cmd>lua vim.lsp.buf.document_symbol()<CR>', opts)
+  buf_set_keymap('n', 'gr', '<cmd>lua vim.lsp.buf.references()<CR>', opts)
+  buf_set_keymap('n', '[d', '<cmd>lua vim.diagnostic.goto_prev({severity = vim.diagnostic.severity.ERROR;})<CR>', opts)
+  buf_set_keymap('n', ']d', '<cmd>lua vim.diagnostic.goto_next({severity = vim.diagnostic.severity.ERROR;})<CR>', opts)
+  buf_set_keymap('n', '<leader>dig', '<cmd>lua vim.diagnostic.setqflist()<CR>', opts)
+end
+
+lspconfig.basedpyright.setup{
+  cmd = {"/home/stef/.local/bin/basedpyright-langserver", "--stdio"},
+  on_attach = OnPythonAttach,
+}
+
+-- Lua LSP Config
 
 local OnLuaInit = function(client)
   local path = client.workspace_folders[1].name
