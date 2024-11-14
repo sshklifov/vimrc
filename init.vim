@@ -135,7 +135,7 @@ set diffopt+=vertical
 
 """"""""""""""""""""""""""""Everything else"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-function init#Sum(...)
+function! init#Sum(...)
   if a:0 == 1 && type(a:1) == v:t_list
     let items = a:1
   else
@@ -146,6 +146,10 @@ function init#Sum(...)
       let res += x
     endfor
     return res
+endfunction
+
+function! init#Warn(msg)
+  call nvim_echo([[a:msg, "WarningMsg"]], v:true, #{})
 endfunction
 
 function s:ScriptLocalVars()
@@ -1145,7 +1149,7 @@ function! s:CompleteFiles(cmd_bang, arg) abort
   endif
   call add(g:review_stack, new_items)
   if empty(new_items)
-    call nvim_echo([["Review completed", "WarningMsg"]], v:true, #{})
+    call init#Warn("Review completed")
     unlet g:review_stack
   else
     call DisplayInQf(new_items, "Review")
@@ -2023,7 +2027,7 @@ function! init#RemoteRecentFiles(remote, ...)
   let p = get(a:, 1, '')
   let regex = '.*' .. p .. '.*'
   let file_args = printf('-type f -cmin -5 -regex "%s"', regex)
-  let cmd = printf('find / -path /proc -prune -type f -o -path /sys -type f -o \( %s \)', file_args)
+  let cmd = printf('find / -path /proc -prune -type f -o -path /sys -prune -type f -o \( %s \)', file_args)
   let files = systemlist(["ssh", a:remote, cmd])
   call init#CreateCustomQuickfix('Remote files', files, '<SID>SelectRemoteFile')
 endfunction
