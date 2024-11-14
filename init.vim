@@ -195,10 +195,30 @@ set hlsearch
 nnoremap <silent> <Space> :nohlsearch<cr>
 
 " Typos
-cabbr Q q
 cabbr W w
-cabbr Qa qa
 cabbr Tab tab
+
+function s:Quit(bang)
+  let windows = 0
+  for tabnr in range(1, tabpagenr('$'))
+    let windows += tabpagewinnr(tabnr, '$')
+  endfor
+  if windows > 1 || !exists('*ConfirmQuit') || ConfirmQuit()
+    exe "q" .. a:bang
+  endif
+endfunction
+
+function s:QuitAll(bang)
+  if exists('*ConfirmQuit') && ConfirmQuit()
+    exe "qall" .. a:bang
+  endif
+endfunction
+
+command! -nargs=0 -bang Q call s:Quit("<bang>")
+command! -nargs=0 -bang Qa call s:QuitAll("<bang>")
+
+cabbr q Q
+cabbr qa Qa
 
 " Annoying quirks
 set updatecount=0
