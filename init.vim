@@ -433,7 +433,7 @@ command! -nargs=0 ChooseHighlight call s:ShowHighlights()
 
 function! s:ShowHistory(CmdLine)
   let result = init#HistFind(a:CmdLine)
-  call init#CreateCustomQuickfix('History', result, 's:SelectCommand')
+  call init#CreateCustomQuickfix('History', result, '<SID>SelectCommand')
 endfunction
 
 function! s:SelectCommand()
@@ -494,7 +494,7 @@ function! s:ShowSessions(pat)
     echo "Nothing to show."
     return
   endif
-  call init#CreateCustomQuickfix('Sessions', session_files, 's:SelectSession')
+  call init#CreateCustomQuickfix('Sessions', session_files, '<SID>SelectSession')
 endfunction
 
 function! s:SelectSession()
@@ -674,7 +674,7 @@ endfunction
 nnoremap <silent> <leader>dif :call <SID>ToggleDiff()<CR>
 
 function! s:Operator(cmd, pending)
-  let &operatorfunc = function('s:DoOperatorCmd', [a:cmd])
+  let &operatorfunc = function('<SID>DoOperatorCmd', [a:cmd])
   if a:pending
     return 'g@'
   else
@@ -836,7 +836,7 @@ function! s:OpenBranchBuffer()
     return init#ShowErrors(dict['stderr'])
   endif
   let branches = filter(dict['stdout'], '!empty(v:val)')
-  call init#CreateCustomQuickfix('Branches', branches, 's:SelectBranch')
+  call init#CreateCustomQuickfix('Branches', branches, '<SID>SelectBranch')
 endfunction
 
 function! s:SelectBranch()
@@ -997,7 +997,7 @@ endfunction
 function! s:DanglingCommits()
   let refs = s:RecentRefs(100)
   call filter(refs, 'v:val =~# "^\\x*$"')
-  call init#CreateCustomQuickfix('Dangling commits', refs, 's:VisitCommit')
+  call init#CreateCustomQuickfix('Dangling commits', refs, '<SID>VisitCommit')
 endfunction
 
 function! s:VisitCommit()
@@ -1997,6 +1997,21 @@ function! init#Scp(remote)
   else
     echo "Copied to /tmp."
   endif
+endfunction
+
+function! init#RemoteRecentFiles(remote, ...)
+  let p = get(a:, 1, '')
+  let regex = '.*' .. p .. '.*'
+  let file_args = printf('-type f -cmin -5 -regex "%s"', regex)
+  let cmd = printf('find / -path /proc -prune -type f -o -path /sys -type f -o \( %s \)', file_args)
+  let files = systemlist(["ssh", a:remote, cmd])
+  call init#CreateCustomQuickfix('Remote files', files, '<SID>SelectRemoteFile')
+endfunction
+
+function! s:SelectRemoteFile()
+  let file = getline('.')
+  quit
+  exe "Sshfs " .. file
 endfunction
 "}}}
 
