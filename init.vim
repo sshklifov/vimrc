@@ -1123,7 +1123,7 @@ endfunction
 command! -nargs=? -complete=customlist,BranchCompl Review call init#TryCall("s:Review", <q-args>)
 
 command! -nargs=0 D Review HEAD
-command! -nargs=0 R Review
+command! -nargs=* R execute "Review " .. <q-args>
 
 function! s:CompleteFiles(cmd_bang, arg) abort
   if !exists("g:review_stack")
@@ -2023,10 +2023,14 @@ function! init#Scp(remote)
   endif
 endfunction
 
-function! init#RemoteRecentFiles(remote, ...)
+function! init#RemoteRecentFiles(bang, remote, ...)
   let p = get(a:, 1, '')
   let regex = '.*' .. p .. '.*'
-  let file_args = printf('-type f -cmin -5 -regex "%s"', regex)
+  if !empty(a:bang)
+    let file_args = printf('-type f -regex "%s"', regex)
+  else
+    let file_args = printf('-type f -cmin -5 -regex "%s"', regex)
+  endif
   let cmd = printf('find / -path /proc -prune -type f -o -path /sys -prune -type f -o \( %s \)', file_args)
   let files = systemlist(["ssh", a:remote, cmd])
   call init#CreateCustomQuickfix('Remote files', files, '<SID>SelectRemoteFile')
