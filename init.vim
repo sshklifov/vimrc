@@ -1319,6 +1319,26 @@ nnoremap <silent> <leader>cc :call <SID>ToggleQf()<CR>
 nnoremap [b [{
 nnoremap ]b ]}
 
+function! s:BlockHierarchy()
+  let pos = getpos('.')[1:2]
+  let blocks = []
+  while v:true
+    let entry = #{filename: bufname(), lnum: pos[0], col: pos[1], text: getline(pos[0])}
+    call add(blocks, entry)
+    keepjumps normal [{
+    let next_pos = getpos('.')[1:2]
+    if next_pos == pos
+      break
+    endif
+    let pos = next_pos
+  endwhile
+  call setqflist([], ' ', #{title: 'Blocks', items: reverse(blocks)})
+  copen
+  silent keepjumps clast
+endfunction
+
+command! -nargs=0 Blocks call s:BlockHierarchy()
+
 " Navigate folds
 nnoremap [z zo[z
 nnoremap ]z zo]z
