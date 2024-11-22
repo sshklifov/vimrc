@@ -152,6 +152,18 @@ function! init#Warn(msg)
   call nvim_echo([[a:msg, "WarningMsg"]], v:true, #{})
 endfunction
 
+function! init#ToClipboard(msg)
+  if empty(a:msg)
+    return
+  endif
+  silent! let @+ = a:msg
+  if len(a:msg) < 100
+    echom printf("Copied to clipboard: '%s'.", a:msg)
+  else
+    echo "Copied to clipboard (truncated)."
+  endif
+endfunction
+
 function s:ScriptLocalVars()
   tabnew
   setlocal buftype=nofile
@@ -606,7 +618,7 @@ function! s:SimplifyTabs(max_count)
   tabfirst
 endfunction
 
-command! -nargs=? Simp call s:SimplifyTabs(empty(<q-args>) ? 5 : <q-args>)
+command! -nargs=? Simp call s:SimplifyTabs(empty(<q-args>) ? 1 : <q-args>)
 
 " CursorHold time
 set updatetime=500
@@ -938,10 +950,10 @@ endfunction
 command! -nargs=0 Pull call s:UpdateBranch()
 
 function! s:PushBranch(force)
-  call init#WorkTreeCleanOrThrow()
   if a:force
     let dict = FugitiveExecute(["push", "--force", "origin", "HEAD"])
   else
+    call init#WorkTreeCleanOrThrow()
     let dict = FugitiveExecute(["push", "origin", "HEAD"])
   endif
   if dict['exit_status'] != 0
@@ -1016,6 +1028,7 @@ function! init#CreateCustomQuickfix(name, lines, cb)
   exe "b " .. nr
   setlocal cursorline
   exe "nnoremap <silent> <buffer> <CR> :call " .. a:cb .. "()<CR>"
+  return nr
 endfunction
 
 function! s:DanglingCommits()
