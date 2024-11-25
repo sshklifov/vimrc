@@ -602,6 +602,8 @@ command! -nargs=0 -bar Retab set invexpandtab | retab!
 
 command! -nargs=0 Shada exe "tabnew " .. stdpath("state") .. "/shada/main.shada" | setlocal bufhidden=wipe
 
+command! -nargs=0 Errno call init#ToClipboard("https://www.thegeekstuff.com/2010/10/linux-error-codes")
+
 function! s:GetWindows(pat, idx)
   let windows = flatten(map(gettabinfo(), "v:val.windows"))
   let win_names = map(windows, '[v:val, expand("#" . winbufnr(v:val) . ":t")]')
@@ -943,7 +945,7 @@ function! init#ShowErrors(errors)
   exe "b " .. nr
 endfunction
 
-function! s:UpdateBranch()
+function! s:UpdateBranch(bang)
   let branch = FugitiveHead()
   let check_file = printf("%s/refs/remotes/origin/%s", FugitiveGitDir(), branch)
   if !filereadable(check_file)
@@ -970,7 +972,13 @@ function! s:UpdateBranch()
     return
   endif
 
-  let args = ["merge", "origin/" .. branch]
+  if !empty(a:bang)
+    let args = ["reset", "--hard", "origin/" .. branch]
+    let msg = "Force reset failed. Dirty repo?"
+  else
+    let args = ["merge", "origin/" .. branch]
+    let msg = "Merge failed. Conflicts?"
+  endif
   let dict = FugitiveExecute(args)
   if dict['exit_status'] != 0
     return init#ShowErrors(dict['stderr'])
@@ -978,7 +986,7 @@ function! s:UpdateBranch()
   exe printf("G log -n %d %s", len(commits), commits[0])
 endfunction
 
-command! -nargs=0 Pull call s:UpdateBranch()
+command! -bang -nargs=0 Pull call s:UpdateBranch("<bang>")
 
 function! s:PushBranch(force)
   if a:force
@@ -2074,7 +2082,7 @@ function! init#SshTerm(remote)
 endfunction
 
 function! init#Sshfs(remote, args)
-  silent exe "tabnew scp://" . a:remote . "/" . a:args
+  silent exe "drop scp://" . a:remote . "/" . a:args
 endfunction
 
 function! init#Scp(remote)
