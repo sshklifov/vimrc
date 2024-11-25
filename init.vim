@@ -219,15 +219,44 @@ function s:Quit(bang)
   for tabnr in range(1, tabpagenr('$'))
     let windows += tabpagewinnr(tabnr, '$')
   endfor
-  if windows > 1 || !exists('*ConfirmQuit') || ConfirmQuit()
+  if windows > 1
     exe "q" .. a:bang
+    return
   endif
+
+  let mod = getbufinfo(#{bufmodified: 1})
+  if empty(a:bang) && !empty(mod)
+    exe "b " .. mod[0].bufnr
+    echo "No write since last change."
+    return
+  endif
+
+  if exists('*ConfirmQuit') && !ConfirmQuit()
+    return
+  endif
+  exe "q" .. a:bang
 endfunction
 
 function s:QuitAll(bang)
-  if exists('*ConfirmQuit') && ConfirmQuit()
-    exe "qall" .. a:bang
+  let mod = getbufinfo(#{bufmodified: 1})
+  if empty(a:bang) && !empty(mod)
+    let items = []
+    let nrs = map(mod, 'v:val.bufnr')
+    for nr in nrs
+      let dict = getchangelist(nr)[0][-1]
+      let dict['bufnr'] = nr
+      let dict['text'] = getbufoneline(nr, dict['lnum'])
+      call add(items, dict)
+    endfor
+    call setqflist([], ' ', #{title: 'Modified buffers', items: items})
+    copen
+    echo "No write since last change."
+    return
   endif
+  if exists('*ConfirmQuit') && !ConfirmQuit()
+    return
+  endif
+  exe "qa" .. a:bang
 endfunction
 
 command! -nargs=0 -bang Q call s:Quit("<bang>")
@@ -608,13 +637,15 @@ function! s:SimplifyTabs(max_count)
 
   silent! tabonly
   silent! only
-  exe "b " .. infos[0]['bufnr']
-  for i in range(1, a:max_count - 1)
-    if i < len(infos) && filereadable(infos[i]['name'])
+  let curr_count = 0
+  for info in infos
+    if curr_count < a:max_count && filereadable(info['name'])
+      exe "b " .. info['bufnr']
       tabnew
-      exe "b " .. infos[i]['bufnr']
+      let curr_count += 1
     endif
   endfor
+  quit
   tabfirst
 endfunction
 
