@@ -2087,23 +2087,20 @@ function! init#Scp(remote)
   endif
 endfunction
 
-function! init#RemoteRecentFiles(bang, remote, ...)
-  let p = get(a:, 1, '')
-  let regex = '.*' .. p .. '.*'
-  if !empty(a:bang)
-    let file_args = printf('-type f -regex "%s"', regex)
-  else
-    let file_args = printf('-type f -cmin -5 -regex "%s"', regex)
-  endif
+function! init#RemoteFindFiles(remote, p)
+  let regex = '.*' .. a:p .. '.*'
+  let file_args = printf('-type f -regex "%s"', regex)
   let cmd = printf('find / -path /proc -prune -type f -o -path /sys -prune -type f -o \( %s \)', file_args)
   let files = systemlist(["ssh", a:remote, cmd])
-  call init#CreateCustomQuickfix('Remote files', files, '<SID>SelectRemoteFile')
+  return v:shell_error ? [] : files
 endfunction
 
-function! s:SelectRemoteFile()
-  let file = getline('.')
-  quit
-  exe "Sshfs " .. file
+function! init#RemoteRecentFiles(remote, ...)
+  let cmin = get(a:, 1, 5)
+  let file_args = printf('-type f -cmin -%d', cmin)
+  let cmd = printf('find / -path /proc -prune -type f -o -path /sys -prune -type f -o \( %s \)', file_args)
+  let files = systemlist(["ssh", a:remote, cmd])
+  return v:shell_error ? [] : files
 endfunction
 "}}}
 
