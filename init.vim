@@ -270,6 +270,7 @@ set updatecount=0
 set shortmess+=I
 au FileType * setlocal fo-=cro
 nnoremap <C-w>t <C-w>T
+nnoremap <silent> zA :set invfoldenable<CR>
 let mapleader = "\\"
 
 " Increase oldfiles size
@@ -1054,9 +1055,10 @@ function! init#CreateCustomBuffer(name, lines)
   call setbufvar(nr, '&buftype', 'nofile')
   call setbufvar(nr, '&bufhidden', 'wipe')
   call bufload(nr)
+  call setbufvar(nr, '&modifiable', v:true)
   call setbufline(nr, 1, a:lines)
-  call setbufvar(nr, '&modified', v:false)
   call setbufvar(nr, '&modifiable', v:false)
+  call setbufvar(nr, '&modified', v:false)
   return nr
 endfunction
 
