@@ -632,24 +632,30 @@ function! WindowCompl(ArgLead, CmdLine, CursorPos)
 endfunction
 
 function! s:SimplifyTabs(max_count)
-  let infos = map(range(1, bufnr('$')), 'getbufinfo(v:val)')
-  call filter(infos, '!empty(v:val)')
-  call map(infos, 'v:val[0]')
-  let Cmp = {a, b -> b['lastused'] - a['lastused']}
-  call sort(infos, Cmp)
+  if a:max_count <= 0
+    return
+  endif
 
-  silent! tabonly
-  silent! only
-  let curr_count = 0
-  for info in infos
-    if curr_count < a:max_count && filereadable(info['name'])
-      exe "b " .. info['bufnr']
-      tabnew
-      let curr_count += 1
+  let tab_last_used = #{}
+  let all_last_used = []
+  for entry in gettabinfo()
+    let nrs = map(entry['windows'], 'winbufnr(v:val)')
+    let lastused = max(map(nrs, 'getbufinfo(v:val)[0].lastused'))
+    let tabnr = entry['tabnr']
+    let tab_last_used[tabnr] = lastused
+    call add(all_last_used, lastused)
+  endfor
+  if len(all_last_used) > a:max_count
+    call sort(all_last_used)
+    let cutoff_time = all_last_used[-a:max_count]
+  else
+    let cutoff_time = 0
+  endif
+  for nr in reverse(range(1, tabpagenr('$')))
+    if tab_last_used[nr] < cutoff_time
+      exe "tabclose " .. nr
     endif
   endfor
-  quit
-  tabfirst
 endfunction
 
 command! -nargs=? Simp call s:SimplifyTabs(empty(<q-args>) ? 1 : <q-args>)
@@ -2087,13 +2093,13 @@ function! init#Sshfs(remote, args)
   silent exe "drop scp://" . a:remote . "/" . a:args
 endfunction
 
-function! init#Scp(remote)
-  let cmd = printf("rsync -pt %s %s:/tmp", expand("%:p"), a:remote)
+function! init#Scp(remote, path)
+  let cmd = printf("rsync -pt %s %s:%s", expand("%:p"), a:remote, a:path)
   let ret = systemlist(cmd)
   if v:shell_error
     call init#ShowErrors(ret)
   else
-    echo "Copied to /tmp."
+    echo "Copied to " .. a:path .. "."
   endif
 endfunction
 
