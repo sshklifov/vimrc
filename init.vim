@@ -1078,6 +1078,22 @@ function! init#CreateCustomQuickfix(name, lines, cb)
   return nr
 endfunction
 
+function! init#OnJobFinished(pat, cb)
+  let nr = str2nr(a:pat)
+  if string(nr) == a:pat
+    let info = nvim_get_chan_info(nr)
+    let nr = info["buffer"]
+  else
+    let nrs = filter(range(1, bufnr('$')), 'bufname(v:val) =~ a:pat')
+    if empty(nrs)
+      echo "No matches for " .. a:pat
+      return
+    endif
+    let nr = nrs[0]
+  endif
+  exe printf("autocmd TermClose <buffer=%d> ++once bw %d | call %s()", nr, nr, a:cb)
+endfunction
+
 function! s:DanglingCommits()
   let refs = s:RecentRefs(100)
   call filter(refs, 'v:val =~# "^\\x*$"')
