@@ -18,6 +18,7 @@ Plug 'sshklifov/debug'
 Plug 'sshklifov/qsearch'
 Plug 'sshklifov/qutil'
 Plug 'sshklifov/rsi'
+Plug 'sshklifov/chadgpt'
 
 let s:is_work_pc = isdirectory("/opt/aisys")
 if s:is_work_pc
@@ -52,6 +53,9 @@ exe printf("autocmd BufWritePost %s source %s", s:this_file_path, s:this_file_pa
 
 " This script
 let g:auto_index_whitelist = ["obsidian-video", "libalcatraz"]
+
+" sshklifov/chadgpt
+let g:chad_api_key = "..."
 
 " sshklifov/work
 if s:is_work_pc
@@ -1854,7 +1858,7 @@ endfunction
 command! -nargs=0 LspStop lua vim.lsp.stop_client(vim.lsp.get_active_clients())
 command! -nargs=0 LspProg lua print(vim.inspect(vim.lsp.status()))
 
-command! -nargs=0 -range=% For lua vim.lsp.buf.format{ range = {start= {<line1>, 0}, ["end"] = {<line2>, 0}} }
+command! -nargs=0 -range For lua vim.lsp.buf.format{ range = {start= {<line1>, 0}, ["end"] = {<line2>, 0}} }
 
 " Document highlight
 highlight LspReferenceText guibg=#51576e gui=underline
