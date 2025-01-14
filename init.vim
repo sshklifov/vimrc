@@ -301,12 +301,18 @@ cnoremap <expr> <Right> pumvisible() ? "\<Space>\<BS>\<Right>" : "\<Right>"
 
 set scrolloff=4
 set autoread
-set splitright
-set nottimeout
+
 set notimeout
 set foldmethod=manual
 set nofoldenable
 set shell=/bin/bash
+set splitright
+
+if !s:is_work_pc
+  " This is causing problems because of slow SSH connections
+  " I think so? But it is definitely causing problems...
+  set nottimeout
+endif
 
 " Display better the currently selected entry in quickfix
 autocmd FileType qf setlocal cursorline
@@ -884,7 +890,7 @@ function init#TryCall(what, ...)
   try
     return Partial()
   catch
-    echo v:exception
+    echom v:exception
   endtry
 endfunction
 
