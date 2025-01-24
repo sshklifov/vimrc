@@ -218,56 +218,8 @@ nnoremap <silent> <Space> :nohlsearch<cr>
 cabbr W w
 cabbr Tab tab
 
-function s:Quit(bang)
-  let windows = 0
-  for tabnr in range(1, tabpagenr('$'))
-    let windows += tabpagewinnr(tabnr, '$')
-  endfor
-  if windows > 1
-    exe "q" .. a:bang
-    return
-  endif
-
-  let mod = getbufinfo(#{bufmodified: 1})
-  if empty(a:bang) && !empty(mod)
-    exe "b " .. mod[0].bufnr
-    echo "No write since last change."
-    return
-  endif
-
-  if exists('*ConfirmQuit') && !ConfirmQuit()
-    return
-  endif
-  exe "q" .. a:bang
-endfunction
-
-function s:QuitAll(bang)
-  let mod = getbufinfo(#{bufmodified: 1})
-  if empty(a:bang) && !empty(mod)
-    let items = []
-    let nrs = map(mod, 'v:val.bufnr')
-    for nr in nrs
-      let dict = getchangelist(nr)[0][-1]
-      let dict['bufnr'] = nr
-      let dict['text'] = getbufoneline(nr, dict['lnum'])
-      call add(items, dict)
-    endfor
-    call setqflist([], ' ', #{title: 'Modified buffers', items: items})
-    copen
-    echo "No write since last change."
-    return
-  endif
-  if exists('*ConfirmQuit') && !ConfirmQuit()
-    return
-  endif
-  exe "qa" .. a:bang
-endfunction
-
-command! -nargs=0 -bang Q call s:Quit("<bang>")
-command! -nargs=0 -bang Qa call s:QuitAll("<bang>")
-
-cabbr q Q
-cabbr qa Qa
+cabbr Q q
+cabbr Qa qa
 
 " Annoying quirks
 set updatecount=0
@@ -415,6 +367,16 @@ function! GetProgressStatusLine(...)
     endif
   endfor
   return ''
+endfunction
+
+function! init#FugitiveExecuteOrThrow(args, ...)
+  let dict = FugitiveExecute(a:args)
+  if dict['exit_status'] != 0
+    let msg = get(a:000, 0, printf("Git '%s' failed!", join(a:args)))
+    call init#ShowErrors(dict['stderr'])
+    throw msg
+  endif
+  return dict['stdout']
 endfunction
 
 function! init#BranchName()
@@ -867,22 +829,20 @@ function UntrackedCompl(ArgLead, CmdLine, CursorPos)
   return s:GetUntracked(bang)->TailItems(a:ArgLead)
 endfunction
 
+function! init#InsideGitOrThrow()
+  call init#FugitiveExecuteOrThrow(["status"], "Not inside repo!")
+endfunction
+
 function! init#WorkTreeCleanOrThrow()
-  let dict = FugitiveExecute(["status", "--porcelain"])
-  if dict['exit_status'] != 0
-    throw "Not inside repo"
-  endif
-  if dict['stdout'][0] != ''
+  let output = init#FugitiveExecuteOrThrow(["status", "--porcelain"], "Not inside repo!")
+  if output[0] != ''
     throw "Work tree not clean"
   endif
 endfunction
 
 function! init#CheckedBranchOrThrow()
-  let dict = FugitiveExecute(["rev-parse", "--abbrev-ref", "HEAD"])
-  if dict['exit_status'] != 0
-    throw "Not inside repo"
-  endif
-  return dict['stdout'][0]
+  let output = init#FugitiveExecuteOrThrow(["rev-parse", "--abbrev-ref", "HEAD"], "Not inside repo!")
+  return output[0]
 endfunction
 
 function init#TryCall(what, ...)
@@ -897,11 +857,8 @@ endfunction
 function! init#SwitchToBranchOrThrow(arg)
   call init#WorkTreeCleanOrThrow()
 
-  let dict = FugitiveExecute(["checkout", a:arg])
-  if dict['exit_status'] != 0
-    throw "Failed to checkout " . a:arg
-  endif
-  call FugitiveExecute(["submodule", "update", "--init", "--recursive"])
+  call init#FugitiveExecuteOrThrow(["checkout", a:arg], "Failed to checkouot " .. a:arg)
+  call init#FugitiveExecuteOrThrow(["submodule", "update", "--init", "--recursive"], "Submodule update failed!")
 endfunction
 
 function! s:GetRefs(ref_dirs, arg)
@@ -917,11 +874,9 @@ function! s:GetRefs(ref_dirs, arg)
 endfunction
 
 function! s:OpenBranchBuffer()
-  let dict = FugitiveExecute(["for-each-ref", "--sort=-committerdate", "refs/heads/", "--format=%(refname:short)"])
-  if dict['exit_status'] != 0
-    return init#ShowErrors(dict['stderr'])
-  endif
-  let branches = filter(dict['stdout'], '!empty(v:val)')
+  let cmd = ["for-each-ref", "--sort=-committerdate", "refs/heads/", "--format=%(refname:short)"]
+  let branches = init#FugitiveExecuteOrThrow(cmd)
+  call filter(branches, '!empty(v:val)')
   call init#CreateCustomQuickfix('Branches', branches, '<SID>SelectBranch')
 endfunction
 
@@ -933,7 +888,7 @@ endfunction
 
 function s:Branch(args)
   if empty(a:args)
-    call s:OpenBranchBuffer()
+    call init#TryCall("s:OpenBranchBuffer")
   else
     call init#TryCall("init#SwitchToBranchOrThrow", a:args)
   endif
@@ -971,18 +926,12 @@ function! s:UpdateBranch(bang)
   endif
 
   let args = ["fetch", "origin", branch]
-  let dict = FugitiveExecute(args)
-  if dict['exit_status'] != 0
-    return init#ShowErrors(dict['stderr'])
-  endif
+  call init#FugitiveExecuteOrThrow(args, "Failed to fetch!")
 
   const range = printf("%s..origin/%s", branch, branch)
   let args = ["log", "--pretty=format:%h", range]
-  let dict = FugitiveExecute(args)
-  if dict['exit_status'] != 0
-    return init#ShowErrors(dict['stderr'])
-  endif
-  const commits = filter(dict['stdout'], "!empty(v:val)")
+  let output = init#FugitiveExecuteOrThrow(args, "Failed to log changes!")
+  const commits = filter(output, "!empty(v:val)")
 
   if len(commits) <= 0
     echo "No changes."
@@ -996,25 +945,20 @@ function! s:UpdateBranch(bang)
     let args = ["merge", "origin/" .. branch]
     let msg = "Merge failed. Conflicts?"
   endif
-  let dict = FugitiveExecute(args)
-  if dict['exit_status'] != 0
-    return init#ShowErrors(dict['stderr'])
-  endif
+  call init#FugitiveExecuteOrThrow(args, msg)
   exe printf("G log -n %d %s", len(commits), commits[0])
 endfunction
 
-command! -bang -nargs=0 Pull call s:UpdateBranch("<bang>")
+command! -bang -nargs=0 Pull call init#TryCall('s:UpdateBranch', "<bang>")
 
 function! s:PushBranch(force)
   if a:force
-    let dict = FugitiveExecute(["push", "--force", "origin", "HEAD"])
+    call init#FugitiveExecuteOrThrow(["push", "--force", "origin", "HEAD"])
   else
     call init#WorkTreeCleanOrThrow()
-    let dict = FugitiveExecute(["push", "origin", "HEAD"])
+    call init#FugitiveExecuteOrThrow(["push", "origin", "HEAD"])
   endif
-  if dict['exit_status'] != 0
-    return init#ShowErrors(dict['stderr'])
-  elseif s:is_work_pc
+  if s:is_work_pc
     let issue = work#BranchIssueNumber()
     if !empty(issue)
       return work#OpenJira(issue)
@@ -1023,12 +967,13 @@ function! s:PushBranch(force)
   echo "Up to date with origin."
 endfunction
 
-command! -nargs=0 -bang Push call s:PushBranch(<bang>0)
+command! -nargs=0 -bang Push call init#TryCall('s:PushBranch', <bang>0)
 
 function! OriginCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
+  " XXX: Prefer not to throw exceptions
   call FugitiveExecute(['fetch', 'origin'])
   return s:GetRefs(['refs/remotes/origin'], a:ArgLead)
 endfunction
@@ -1088,20 +1033,19 @@ function! init#CreateCustomQuickfix(name, lines, cb)
   return nr
 endfunction
 
-function! init#OnJobFinished(pat, cb)
-  let nr = str2nr(a:pat)
-  if string(nr) == a:pat
-    let info = nvim_get_chan_info(nr)
-    let nr = info["buffer"]
-  else
-    let nrs = filter(range(1, bufnr('$')), 'bufname(v:val) =~ a:pat')
-    if empty(nrs)
-      echo "No matches for " .. a:pat
-      return
-    endif
-    let nr = nrs[0]
+function! init#OnTermClose(bufnr, cb)
+  let status = v:event['status']
+  if status == 0
+    exe "bw " .. a:bufnr
+    exe printf("call %s()", a:cb)
   endif
-  exe printf("autocmd TermClose <buffer=%d> ++once bw %d | call %s()", nr, nr, a:cb)
+endfunction
+
+function! init#OnJobFinished(id, cb)
+  let id = str2nr(a:id)
+  let info = nvim_get_chan_info(id)
+  let nr = info["buffer"]
+  exe printf("autocmd TermClose <buffer=%d> ++once call init#OnTermClose(%d, '%s')", nr, nr, a:cb)
 endfunction
 
 function! s:DanglingCommits()
@@ -1118,34 +1062,33 @@ endfunction
 
 command! -nargs=0 Dangle call s:DanglingCommits()
 
-function! init#MasterOrThrow()
-  let branches = s:GetRefs(['refs/remotes'], 'ma')
-  if index(branches, 'origin/obsidian-master') >= 0
-    return 'origin/obsidian-master'
-  elseif index(branches, 'origin/master') >= 0
-    return 'origin/master'
-  elseif index(branches, 'origin/main') >= 0
-    return 'origin/main'
+function! init#MasterOrThrow(remote)
+  if a:remote
+    let refs_dir = 'refs/remotes'
+    let candidates = ['origin/obsidian-master', 'origin/master', 'origin/main']
   else
-    throw "Failed to determine mainline."
+    let refs_dir = 'refs/heads'
+    let candidates = ['obsidian-master', 'master', 'main']
   endif
+  let branches = s:GetRefs([refs_dir], 'ma')
+  for candidate in candidates
+    if index(branches, candidate) >= 0
+      return candidate
+    endif
+  endfor
+  throw "Failed to determine mainline."
 endfunction
 
 function! init#HashOrThrow(commitish)
-  let dict = FugitiveExecute(["rev-parse", a:commitish])
-  if dict['exit_status'] != 0
-    throw "Failed to parse " .. a:commitish
-  endif
-  return dict['stdout'][0]
+  let msg = "Failed to parse " .. a:commitish
+  let output = init#FugitiveExecuteOrThrow(["rev-parse", a:commitish], msg)
+  return output[0]
 endfunction
 
 function! init#BranchCommitsOrThrow(branch, main)
   let range = printf("%s..%s", a:main, a:branch)
-  let dict = FugitiveExecute(["log", range, "--pretty=format:%H"])
-  if dict['exit_status'] != 0
-    throw "Revision range failed"
-  endif
-  return dict['stdout']
+  let cmd = ["log", range, "--pretty=format:%H"]
+  return init#FugitiveExecuteOrThrow(cmd, "Revision range failed!")
 endfunction
 
 function! init#CommonParentOrThrow(branch, main)
@@ -1156,25 +1099,50 @@ function! init#CommonParentOrThrow(branch, main)
     return a:main
   endif
   " Go 1 back to find the common commit
-  let dict = FugitiveExecute(["rev-parse", branch_first . "~1"])
-  if dict['exit_status'] != 0
-    throw "Failed to go back 1 commit from " . branch_first
-  endif
-  let common = dict['stdout'][0]
-  return common
+  let msg = "Failed to go back 1 commit from " . branch_first
+  let output = init#FugitiveExecuteOrThrow(["rev-parse", branch_first . "~1"], msg)
+  return output[0]
 endfunction
 
 function! init#RefExistsOrThrow(commit)
-  if FugitiveExecute(["show", a:commit])['exit_status'] != 0
-    throw "Unknown ref to git: " . a:commit
-  endif
+  let msg = "Unknown ref to git: " . a:commit
+  call init#FugitiveExecuteOrThrow(["show", a:commit], msg)
 endfunction
 
-function! init#InsideGitOrThrow()
-  if FugitiveExecute(["status"])['exit_status'] != 0
-    throw "Not inside repo"
-  endif
+function! s:BaselineOrThrow(...)
+  let arg = get(a:000, 0, '')
+  call init#InsideGitOrThrow()
+  " Determine main branch
+  let head = init#HashOrThrow("HEAD")
+  let mainline = empty(arg) ? init#MasterOrThrow(v:true) : arg
+  call init#RefExistsOrThrow(mainline)
+  return init#CommonParentOrThrow(head, mainline)
 endfunction
+
+command! -nargs=? -complete=customlist,BranchCompl Base echo init#TryCall("s:BaselineOrThrow", <q-args>)
+
+function! s:SquashOrThrow(arg)
+  let bpoint = s:BaselineOrThrow(a:arg)
+  exe "Git rebase -i " .. bpoint
+endfunction
+
+command! -nargs=? -complete=customlist,BranchCompl Squash call init#TryCall("s:SquashOrThrow", <q-args>)
+
+function! s:FetchRebaseOrThrow()
+  let main = init#MasterOrThrow(v:false)
+  call init#FugitiveExecuteOrThrow(["fetch", "origin", main])
+  call init#FugitiveExecuteOrThrow(["rebase", "origin/" .. main])
+  echo "Rebased onto fresh origin/"  .. main
+endfunction
+
+command! -nargs=0 Rebase call init#TryCall('s:FetchRebaseOrThrow')
+
+function! s:ShowBranchCommitsOrThrow()
+  let bpoint = s:BaselineOrThrow()
+  exe printf("G log %s..HEAD", bpoint)
+endfunction
+
+command! -nargs=0 Changes call init#TryCall('s:ShowBranchCommitsOrThrow')
 
 function! s:Review(arg)
   " Refresh current state of review
@@ -1185,12 +1153,7 @@ function! s:Review(arg)
     return
   endif
 
-  call init#InsideGitOrThrow()
-  " Determine main branch
-  let head = init#HashOrThrow("HEAD")
-  let mainline = empty(a:arg) ? init#MasterOrThrow() : a:arg
-  call init#RefExistsOrThrow(mainline)
-  let bpoint = init#CommonParentOrThrow(head, mainline)
+  let bpoint = s:BaselineOrThrow(a:arg)
   " Load files for review.
   " If possible, make the diff windows editable by not passing a ref to fugitive
   if get(a:, "arg", "") == "HEAD"
@@ -1203,7 +1166,13 @@ function! s:Review(arg)
     call map(bufs, 'setbufvar(v:val, "commitish", bpoint)')
   endif
   call setqflist([], 'a', #{title: "Review"})
-  let g:review_stack = [getqflist()]
+  let entries = getqflist()
+  if empty(getqflist())
+    echo "Nothing to show."
+    cclose
+  else
+    let g:review_stack = [getqflist()]
+  endif
 endfunction
 
 command! -nargs=? -complete=customlist,BranchCompl Review call init#TryCall("s:Review", <q-args>)
@@ -1299,16 +1268,13 @@ function! s:Pickaxe(keyword)
   call init#InsideGitOrThrow()
   " Determine branch.
   let head = init#HashOrThrow("HEAD")
-  let mainline = init#MasterOrThrow()
+  let mainline = init#MasterOrThrow(v:false)
   let commits = init#BranchCommitsOrThrow(head, mainline)
   " Add a fake commit for unstanged changes
   call add(commits, "0000000000000000000000000000000000000000")
   " Get changed files.
-  let dict = FugitiveExecute(["diff", "HEAD~" .. len(commits), "--name-only"])
-  if dict['exit_status'] != 0
-    throw "Collecting changed filed failed"
-  endif
-  let files = dict['stdout']
+  let cmd = ["diff", "HEAD~" .. len(commits), "--name-only"]
+  let files = init#FugitiveExecuteOrThrow(cmd, "Collecting changed files failed!")
   call map(files, 'FugitiveFind(v:val)')
   " Run git bame on each file
   let output = []
@@ -1486,7 +1452,18 @@ function! s:OpenCMakeLists()
   endwhile
 endfunction
 
-command! -nargs=0 Cmake call <SID>OpenCMakeLists()
+command! -nargs=0 Cmake call s:OpenCMakeLists()
+
+function! s:OpenCMakeCache()
+  let repo = FugitiveWorkTree()
+  let cache_file = printf("%s/%s/CMakeCache.txt", repo, g:BUILD_TYPE)
+  if !filereadable(cache_file)
+    return
+  endif
+  exe "e " .. cache_file
+endfunction
+
+command! -nargs=0 Cache call s:OpenCMakeCache()
 
 function! s:EditFugitive()
   let actual = bufname()
@@ -1707,14 +1684,14 @@ endif
 " Available modes:
 " - exe. Pass executable + arguments
 " - proc. Process pid to attach.
-" - headless. Do not run any inferior
 " Other arguments:
-" - symbols. Whether to load symbols or not. Used for faster loading of gdb.
+" - wait: Don't start/run the inferior.
+" - post_cmds. List of commands to execute after starting inferior.
 " - ssh. Launch GDB over ssh with the given address.
-" - br. Place a breakpoint at location and run inferior.
+" - br. Place a breakpoint at location and run inferior instead.
 function! init#Debug(args)
-  let required = ['exe', 'proc', 'headless']
-  let optional = ['symbols', 'ssh', 'user', 'br']
+  let required = ['exe', 'proc']
+  let optional = ['wait', 'post_cmds', 'ssh', 'user', 'br']
   let req_keys = filter(keys(a:args), "index(required, v:val) >= 0")
   if len(req_keys) != 1
     echo "Must pass exactly one of: " . string(required)
@@ -1728,7 +1705,7 @@ function! init#Debug(args)
   endif
 
   if PromptDebugIsOpen()
-    echoerr 'Terminal debugger already running, cannot run two'
+    echo 'Terminal debugger already running, cannot run two'
     return
   endif
 
@@ -1786,9 +1763,6 @@ function! s:DebugStartPost(args)
   call PromptDebugSendCommand("set breakpoint pending on")
   call PromptDebugSendCommand("skip -rfu ^std::")
   call PromptDebugSendCommand("skip -rfu ^cv::")
-  if quick_load
-    call PromptDebugSendCommand("set auto-solib-add off")
-  endif
 
   " Custom pretty printers
   call PromptDebugPrettyPrinter(['std::filesystem'], "PrettyPrinterFilesystem")
@@ -1808,12 +1782,19 @@ function! s:DebugStartPost(args)
     endif
     if has_key(a:args, "br")
       call PromptDebugSendCommand("br " . a:args['br'])
-      call PromptDebugSendCommand("r")
-    else
-      call PromptDebugSendCommand("start")
     endif
-  elseif has_key(a:args, "headless") && a:args['headless']
-    " NO-OP
+    if !has_key(a:args, "wait")
+      if has_key(a:args, "br")
+        call PromptDebugSendCommand("r")
+      else
+        call PromptDebugSendCommand("start")
+      endif
+    endif
+  endif
+  if has_key(a:args, 'post_cmds')
+    for cmd in a:args['post_cmds']
+      call PromptDebugSendCommand(cmd)
+     endfor
   endif
 endfunction
 
