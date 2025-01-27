@@ -921,8 +921,7 @@ function! s:UpdateBranch(bang)
   let branch = FugitiveHead()
   let check_file = printf("%s/refs/remotes/origin/%s", FugitiveGitDir(), branch)
   if !filereadable(check_file)
-    echo "Could not find origin/" .. branch
-    return
+    call init#Warn("Could not find origin/" .. branch)
   endif
 
   let args = ["fetch", "origin", branch]
@@ -942,7 +941,7 @@ function! s:UpdateBranch(bang)
     let args = ["reset", "--hard", "origin/" .. branch]
     let msg = "Force reset failed. Dirty repo?"
   else
-    let args = ["merge", "origin/" .. branch]
+    let args = ["merge", "--ff-only", "origin/" .. branch]
     let msg = "Merge failed. Conflicts?"
   endif
   call init#FugitiveExecuteOrThrow(args, msg)
@@ -978,6 +977,19 @@ function! OriginCompl(ArgLead, CmdLine, CursorPos)
   return s:GetRefs(['refs/remotes/origin'], a:ArgLead)
 endfunction
 
+function! init#Unique(list)
+  let idx = 0
+  let hash_map = #{}
+  for item in a:list
+    if !has_key(hash_map, item)
+      let hash_map[item] = idx
+      let idx += 1
+    endif
+  endfor
+  let order = sort(items(hash_map), {a, b -> a[1] - b[1]})
+  return map(order, 'v:val[0]')
+endfunction
+
 function! s:RecentRefs(max_refs)
   let max_refs = a:max_refs
   if type(max_refs) == v:t_number
@@ -987,7 +999,7 @@ function! s:RecentRefs(max_refs)
   if dict['exit_status'] != 0
     return []
   endif
-  let hashes = dict['stdout']
+  let hashes = init#Unique(dict['stdout'])
   let dict = FugitiveExecute(["name-rev", "--annotate-stdin", "--name-only"], #{stdin: hashes})
   if dict['exit_status'] != 0
     return []
@@ -1033,11 +1045,11 @@ function! init#CreateCustomQuickfix(name, lines, cb)
   return nr
 endfunction
 
-function! init#OnTermClose(bufnr, cb)
+function! init#OnTermClose(bufnr, Cb)
   let status = v:event['status']
   if status == 0
     exe "bw " .. a:bufnr
-    exe printf("call %s()", a:cb)
+    call a:Cb()
   endif
 endfunction
 
@@ -1045,7 +1057,15 @@ function! init#OnJobFinished(id, cb)
   let id = str2nr(a:id)
   let info = nvim_get_chan_info(id)
   let nr = info["buffer"]
-  exe printf("autocmd TermClose <buffer=%d> ++once call init#OnTermClose(%d, '%s')", nr, nr, a:cb)
+  if type(a:cb) == v:t_string
+    let Cb = function(a:cb)
+  elseif type(a:cb) == v:t_func
+    let Cb = a:cb
+  else
+    echo "Dude what?"
+    return
+  endif
+  exe printf("autocmd TermClose <buffer=%d> ++once call init#OnTermClose(%d, %s)", nr, nr, string(Cb))
 endfunction
 
 function! s:DanglingCommits()
