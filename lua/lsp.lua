@@ -3,6 +3,139 @@
 local lspconfig = require('lspconfig')
 local api = vim.api
 local uv = vim.uv
+local util = require('vim.lsp.util')
+
+-- Retrieve lsp highlight
+-- XXX: Copied from semantic_tokens.lua in runtime, so it's not the most stable code
+local function modifiers_from_number(x, modifiers_table)
+  local modifiers = {} ---@type table<string,boolean>
+  local idx = 1
+  while x > 0 do
+    if bit.band(x, 1) == 1 then
+      modifiers[modifiers_table[idx]] = true
+    end
+    x = bit.rshift(x, 1)
+    idx = idx + 1
+  end
+  return modifiers
+end
+
+local function tokens_to_ranges(data, bufnr, client)
+  local legend = client.server_capabilities.semanticTokensProvider.legend
+  local token_types = legend.tokenTypes
+  local token_modifiers = legend.tokenModifiers
+  local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local ranges = {} ---@type STTokenRange[]
+
+  local line ---@type integer?
+  local start_char = 0
+  for i = 1, #data, 5 do
+    local delta_line = data[i]
+    line = line and line + delta_line or delta_line
+    local delta_start = data[i + 1]
+    start_char = delta_line == 0 and start_char + delta_start or delta_start
+
+    -- data[i+3] +1 because Lua tables are 1-indexed
+    local token_type = token_types[data[i + 3] + 1]
+    local modifiers = modifiers_from_number(data[i + 4], token_modifiers)
+
+    local function _get_byte_pos(col)
+      if col > 0 then
+        local buf_line = lines[line + 1] or ''
+        local ok, result
+        ok, result = pcall(util._str_byteindex_enc, buf_line, col, client.offset_encoding)
+        if ok then
+          return result
+        end
+        return math.min(#buf_line, col)
+      end
+      return col
+    end
+
+    local start_col = _get_byte_pos(start_char)
+    local end_col = _get_byte_pos(start_char + data[i + 2])
+
+    if token_type then
+      ranges[#ranges + 1] = {
+        line = line,
+        start_col = start_col,
+        end_col = end_col,
+        type = token_type,
+        modifiers = modifiers,
+        marked = false,
+      }
+    end
+  end
+
+  return ranges
+end
+
+local function parse_highlights(highlights, ft)
+  local line_marks = {}
+  local set_mark = function(token, hl_group, delta)
+    local opts = {
+      hl_group = hl_group,
+      end_col = token.end_col,
+      priority = vim.highlight.priorities.semantic_tokens + delta,
+      strict = false
+    }
+    table.insert(line_marks, {token.line, token.start_col, opts})
+  end
+  for i = 1, #highlights do
+    local token = highlights[i]
+    if not token.marked then
+      set_mark(token, string.format('@lsp.type.%s.%s', token.type, ft), 0)
+      for modifier, _ in pairs(token.modifiers) do
+        set_mark(token, string.format('@lsp.mod.%s.%s', modifier, ft), 1)
+        set_mark(token, string.format('@lsp.typemod.%s.%s.%s', token.type, modifier, ft), 2)
+      end
+      token.marked = true
+    end
+  end
+  return line_marks
+end
+
+-- Make sure there is a client
+local function on_attached(bufnr, callback)
+  if vim.tbl_isempty(vim.lsp.get_clients({ bufnr = bufnr })) then
+    vim.api.nvim_create_autocmd("LspAttach", {
+      callback = callback,
+      pattern = vim.api.nvim_buf_get_name(bufnr),
+      once = true
+    })
+  else
+    callback()
+  end
+end
+
+function GetSemanticTokens(bufnr, callback, args)
+  on_attached(bufnr, function()
+    args = args or {}
+    local num_args = #args
+
+    local params = {textDocument = vim.lsp.util.make_text_document_params(bufnr)}
+    vim.lsp.buf_request(bufnr, "textDocument/semanticTokens/full", params, function(err, result, ctx, _)
+      if err or not result or not result.data then
+        local bufname = vim.api.nvim_buf_get_name(bufnr)
+        vim.api.nvim_err_writeln("No semantic tokens for " .. bufname)
+        return
+      end
+
+      local client = vim.lsp.get_client_by_id(ctx.client_id)
+      local tokens = result.data
+      local highlights = tokens_to_ranges(tokens, bufnr, client)
+      local ft = vim.bo[bufnr].filetype
+      local items = parse_highlights(highlights, ft)
+
+      for _, item in ipairs(items) do
+        for i = 1, 3 do
+          args[num_args + i] = item[i]
+        end
+        vim.call(callback, unpack(args))
+      end
+    end)
+  end)
+end
 
 -- Clangd extensions
 
