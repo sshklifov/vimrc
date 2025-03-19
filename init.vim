@@ -18,7 +18,7 @@ Plug 'sshklifov/debug'
 Plug 'sshklifov/qsearch'
 Plug 'sshklifov/qutil'
 Plug 'sshklifov/rsi'
-Plug 'sshklifov/chadgpt'
+Plug 'sshklifov/git'
 
 let s:is_work_pc = isdirectory("/opt/aisys")
 if s:is_work_pc
@@ -54,25 +54,27 @@ exe printf("autocmd BufWritePost %s source %s", s:this_file_path, s:this_file_pa
 " This script
 let g:auto_index_whitelist = ["obsidian-video", "libalcatraz"]
 
-" sshklifov/chadgpt
-let g:chad_api_key = "..."
+" sshklifov/git
+let g:git_install = 1
+" Mostly remove search from foldopen
+set foldopen=block,hor,jump,mark,quickfix,undo
 
 " sshklifov/work
 if s:is_work_pc
-  let s:default_host = "max_p15"
+  let s:default_host = "p15"
   if !exists('g:HOST')
     let g:HOST = s:default_host
     let g:DEVICE = "p15"
   endif
   if !exists('g:BUILD_TYPE')
-    let g:BUILD_TYPE = "Debug"
+    let g:BUILD_TYPE = "Release"
   endif
   call plug#load('work')
 endif
 
 " sshklifov/rsi
 command! -nargs=0 Rest call RsiEnterRest()
-command! -nargs=0 Rsi call RsiPrintStats()
+command! -nargs=0 Stats call RsiPrintStats()
 
 " sshklifov/debug
 let g:promptdebug_commands = 0
@@ -139,6 +141,154 @@ set diffopt+=vertical
 
 """"""""""""""""""""""""""""Everything else"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function! init#GetState()
+  return deepcopy(s:)
+endfunction
+
+function! init#AppendChunks(bufnr, lnum, chunks)
+  let line = join(map(copy(a:chunks), "v:val[0]"), '')
+  if nvim_buf_line_count(a:bufnr) > 0
+    call appendbufline(a:bufnr, a:lnum, line)
+  else
+    call setbufline(a:bufnr, a:lnum, line)
+  endif
+
+  let ns = nvim_create_namespace('ChunkHighlight')
+  let end_col = 0
+  for [msg, hl_group] in a:chunks
+    let start_col = end_col
+    let end_col = start_col + len(msg)
+    if end_col > start_col
+      let opts = #{end_col: end_col, hl_group: hl_group}
+      call nvim_buf_set_extmark(a:bufnr, ns, a:lnum, start_col, opts)
+    endif
+  endfor
+endfunc
+
+function! init#AppendChunksAtEnd(bufnr, chunks)
+  let lnum = nvim_buf_line_count(a:bufnr)
+  call init#AppendChunks(a:bufnr, lnum, a:chunks)
+endfunction
+
+function! init#CopySyntax(src_lnum, dst_buf, ...)
+  let items = []
+  let text = ""
+  let text_hl = ""
+  let src_line = getline(a:src_lnum)
+  for idx in range(len(src_line))
+    let hl = synID(a:src_lnum, idx + 1, 1)->synIDattr("name")
+    if hl == text_hl
+      let text ..= src_line[idx]
+    else
+      call add(items, [text, text_hl])
+      let text = src_line[idx]
+      let text_hl = hl
+    endif
+  endfor
+  call add(items, [text, text_hl])
+  let dst_lnum = get(a:000, 0, nvim_buf_line_count(a:dst_buf))
+  call init#AppendChunks(a:dst_buf, dst_lnum, items)
+endfunction
+
+function! init#CreateCustomBuffer(name, lines)
+  let nr = bufadd(a:name)
+  call setbufvar(nr, '&buftype', 'nofile')
+  call setbufvar(nr, '&bufhidden', 'wipe')
+  call bufload(nr)
+  call setbufvar(nr, '&modifiable', v:true)
+  call setbufline(nr, 1, a:lines)
+  call setbufvar(nr, '&modifiable', v:false)
+  call setbufvar(nr, '&modified', v:false)
+  return nr
+endfunction
+
+function! init#CustomBottomBuffer(name, lines)
+  let nr = init#CreateCustomBuffer(a:name, a:lines)
+  bot sp
+  exe "b " .. nr
+  return nr
+endfunction
+
+function! init#OnJobFinished(id, cb)
+  let id = str2nr(a:id)
+  let info = nvim_get_chan_info(id)
+  let nr = info["buffer"]
+  if type(a:cb) == v:t_string
+    let Cb = function(a:cb)
+  elseif type(a:cb) == v:t_func
+    let Cb = a:cb
+  else
+    echo "Dude what?"
+    return
+  endif
+  exe printf("autocmd TermClose <buffer=%d> ++once call init#OnTermClose(%d, %s)", nr, nr, string(Cb))
+endfunction
+
+function! init#CreateCustomQuickfix(name, lines, cb)
+  let nr = init#CustomBottomBuffer('History', a:lines)
+  resize 10
+  setlocal cursorline
+  if type(a:cb) == v:t_string
+    let Cb = function(a:cb)
+  elseif type(a:cb) == v:t_func
+    let Cb = a:cb
+  else
+    echo "Dude what?"
+    return -1
+  endif
+  exe "nnoremap <silent> <buffer> <CR> :call " .. string(Cb) .. "()<CR>"
+  exe printf("autocmd TermClose <buffer=%d> ++once call init#OnTermClose(%d, %s)", nr, nr, string(Cb))
+  return nr
+endfunction
+
+function! init#OnTermClose(bufnr, Cb)
+  let status = v:event['status']
+  if status == 0
+    exe "bw " .. a:bufnr
+    call a:Cb()
+  endif
+endfunction
+
+function! init#Unique(list)
+  let idx = 0
+  let hash_map = #{}
+  for item in a:list
+    if !has_key(hash_map, item)
+      let hash_map[item] = idx
+      let idx += 1
+    endif
+  endfor
+  let order = sort(items(hash_map), {a, b -> a[1] - b[1]})
+  return map(order, 'v:val[0]')
+endfunction
+
+function! init#ShowErrors(errors)
+  let errors = map(a:errors, "strtrans(v:val)")
+  if empty(errors)
+    let errors = ["<No errors to show>"]
+  endif
+
+  call init#CustomBottomBuffer('Errors', errors)
+endfunction
+
+function init#SystemOrThrow(args)
+  let output = systemlist(a:args)
+  if v:shell_error
+    call init#ShowErrors(output)
+    throw "System call failed!"
+  endif
+  return output
+endfunction
+
+function init#TryCall(what, ...)
+  let Partial = function(a:what, a:000)
+  try
+    return Partial()
+  catch
+    echom v:exception
+  endtry
+endfunction
+
 function! init#Sum(...)
   if a:0 == 1 && type(a:1) == v:t_list
     let items = a:1
@@ -311,7 +461,7 @@ function! GetFileStatusLine()
 
   let filename = expand("%:p")
   let cwd = getcwd()
-  let mixedStatus = (filename[0:len(cwd)-1] == cwd)
+  let mixedStatus = (filename[0:len(cwd)] == (cwd .. "/"))
 
   " Dir is not substring of file -> Display file only
   if !mixedStatus
@@ -367,24 +517,6 @@ function! GetProgressStatusLine(...)
     endif
   endfor
   return ''
-endfunction
-
-function! init#FugitiveExecuteOrThrow(args, ...)
-  let dict = FugitiveExecute(a:args)
-  if dict['exit_status'] != 0
-    let msg = get(a:000, 0, printf("Git '%s' failed!", join(a:args)))
-    call init#ShowErrors(dict['stderr'])
-    throw msg
-  endif
-  return dict['stdout']
-endfunction
-
-function! init#BranchName()
-  let dict = FugitiveExecute(["branch", "--show-current"])
-  if dict['exit_status'] != 0
-    return ''
-  endif
-  return dict['stdout'][0]
 endfunction
 
 function! BranchStatusLine()
@@ -468,6 +600,17 @@ command! -nargs=0 ChooseHighlight call s:ShowHighlights()
 
 """"""""""""""""""""""""""""IDE maps"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function s:PushCommand(bang)
+  call git#PushCommand(a:bang)
+  if s:is_work_pc
+    let issue = work#BranchIssueNumber()
+    if !empty(issue) && exists('*work#OpenJira')
+      return work#OpenJira(issue)
+    endif
+  endif
+endfunction
+
+command! -nargs=0 -bang Push call s:PushCommand("<bang>")
 
 function! s:ShowHistory(CmdLine)
   let result = init#HistFind(a:CmdLine)
@@ -484,7 +627,7 @@ command! -nargs=* History call s:ShowHistory(<q-args>)
 
 function! s:GetSessionFile()
   let repo = fnamemodify(FugitiveWorkTree(), ':t')
-  let branch = init#BranchName()
+  let branch = git#GetBranch()
   if !empty(branch) && !empty(repo)
     let branch = substitute(branch, '/', '.', 'g')
     let session_file = printf('%s.%s.vim', repo, branch)
@@ -643,695 +786,10 @@ inoremap {<CR> {<CR>}<C-o>O
 nmap <leader>sp :setlocal invspell<CR>
 " }}}
 
-""""""""""""""""""""""""""""Git"""""""""""""""""""""""""""" {{{
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-function! s:DiffFugitiveWinid()
-  " Load all windows in tab
-  let winids = gettabinfo(tabpagenr())[0]["windows"]
-  let winfos = map(winids, "getwininfo(v:val)[0]")
-  " Ignore quickfix
-  let winfos = filter(winfos, "v:val.quickfix != 1")
-
-  " Consider two way diffs only
-  if len(winfos) != 2
-    return -1
-  endif
-  " Both buffers should have 'diff' set
-  if win_execute(winfos[0].winid, "echon &diff") != "1" || win_execute(winfos[1].winid, "echon &diff") != "1"
-    return -1
-  endif
-  " Consider diffs comming from fugitive plugin only
-  if bufname(winfos[0].bufnr) =~# "^fugitive:///"
-    return winfos[0].winid
-  endif
-  if bufname(winfos[1].bufnr) =~# "^fugitive:///"
-    return winfos[1].winid
-  endif
-  return -1
-endfunction
-
-function! s:CanStartDiff()
-  " Load all windows in tab
-  let winids = gettabinfo(tabpagenr())[0]["windows"]
-  let winfos = map(winids, "getwininfo(v:val)[0]")
-  " Ignore quickfix
-  let winfos = filter(winfos, "v:val.quickfix != 1")
-  " Only a single file can be opened
-  if len(winfos) != 1
-    return 0
-  endif
-  " Must exist on disk
-  let bufnr = winfos[0].bufnr
-  if !filereadable(bufname(bufnr))
-    return 0
-  endif
-  " Must be inside git
-  return !empty(FugitiveGitDir(bufnr))
-endfunction
-
-" Mostly remove search from foldopen
-set foldopen=block,hor,jump,mark,quickfix,undo
-
-function! s:ToggleDiff()
-  let winid = s:DiffFugitiveWinid()
-  if winid >= 0
-    let bufnr = getwininfo(winid)[0].bufnr
-    if getbufvar(bufnr, '&mod') == 1
-      echo "No write since last change"
-      return
-    endif
-    let name = bufname(bufnr)
-    let commitish = split(FugitiveParse(name)[0], ":")[0]
-    " Memorize the last diff commitish for the buffer
-    call setbufvar(bufnr, 'commitish', commitish)
-    " Close fugitive window
-    call win_gotoid(winid)
-    quit
-  elseif s:CanStartDiff()
-    cclose
-    let was_winid = win_getid()
-    if exists("b:commitish") && b:commitish != "0"
-      exe "lefta Gdiffsplit " . b:commitish
-    else
-      exe "lefta Gdiffsplit"
-    endif
-    call win_gotoid(was_winid)
-  endif
-endfunction
-
-nnoremap <silent> <leader>dif :call <SID>ToggleDiff()<CR>
-
-function! s:Operator(cmd, pending)
-  let &operatorfunc = function('<SID>DoOperatorCmd', [a:cmd])
-  if a:pending
-    return 'g@'
-  else
-    return 'g@_'
-  endif
-endfunction
-
-function! s:DoOperatorCmd(cmd, type)
-  if a:type != "line"
-    return
-  endif
-  let firstline = line("'[")
-  let lastline = line("']")
-  exe printf("%d,%d%s", firstline, lastline, a:cmd)
-endfunction
-
-function! s:DiffOtherExecute(cmd)
-  let winids = gettabinfo(tabpagenr())[0]['windows']
-  if winids[0] != win_getid()
-    call win_gotoid(winids[0])
-    exe a:cmd
-    call win_gotoid(winids[1])
-  else
-    call win_gotoid(winids[1])
-    exe a:cmd
-    call win_gotoid(winids[0])
-  endif
-endfunction
-
-function! s:EnableDiffMaps()
-  if v:option_new
-    " Diff put
-    nnoremap <expr> dp <SID>Operator("diffput", 1)
-    nnoremap <expr> dP <SID>Operator("diffput", 0)
-    " Diff get
-    nnoremap <expr> do <SID>Operator("diffget", 1)
-    nnoremap <expr> dO <SID>Operator("diffget", 0)
-    " Undoing diffs
-    nnoremap dpu <cmd>call <SID>DiffOtherExecute("undo")<CR>
-    " Saving diffs
-    nnoremap dpw <cmd>call <SID>DiffOtherExecute("write")<CR>
-    " Good ol' regular diff commands
-    nnoremap dpp dp
-    nnoremap doo do
-    " Visual mode
-    vnoremap dp :diffput<CR>
-    vnoremap do :diffget<CR>
-  else
-    let normal_list = ["dp", "dP", "do", "dO", "dpu", "dpw", "dpp", "dpp"]
-    for bind in normal_list
-      silent! "nunmap " . bind
-    endfor
-    " Visual mode
-    silent! vunmap dp
-    silent! vunmap do
-  endif
-endfunction
-
-autocmd! OptionSet diff call s:EnableDiffMaps()
-
-function! s:GetUnstaged()
-  let dict = FugitiveExecute(["ls-files", "--exclude-standard", "--modified"])
-  if dict['exit_status'] != 0
-    return []
-  endif
-  let files = filter(dict['stdout'], "!empty(v:val)")
-  if empty(files)
-    return []
-  endif
-  " Git reports these duplicated sometimes
-  call uniq(sort(files))
-  return map(files, "FugitiveFind(v:val)")
-endfunction
-
-command! -nargs=? -complete=customlist,UnstagedCompl Dirty
-      \ call s:GetUnstaged()->FileFilter(<q-args>)->DropInQf("Unstaged")
-
-function UnstagedCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  return s:GetUnstaged()->TailItems(a:ArgLead)
-endfunction
-
-function! s:GetUntracked()
-  let dict = FugitiveExecute(["ls-files", "--exclude-standard", "--others"])
-  if dict['exit_status'] != 0
-    return []
-  endif
-  let files = filter(dict['stdout'], "!empty(v:val)")
-  if empty(files)
-    return []
-  endif
-  return map(files, "FugitiveFind(v:val)")
-endfunction
-
-command! -nargs=? -complete=customlist,UntrackedCompl Untracked
-      \ call s:GetUntracked()->FileFilter(<q-args>)->DropInQf("Untracked")
-
-function UntrackedCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  return s:GetUntracked(bang)->TailItems(a:ArgLead)
-endfunction
-
-function! init#InsideGitOrThrow()
-  call init#FugitiveExecuteOrThrow(["status"], "Not inside repo!")
-endfunction
-
-function! init#WorkTreeCleanOrThrow()
-  let output = init#FugitiveExecuteOrThrow(["status", "--porcelain"], "Not inside repo!")
-  if output[0] != ''
-    throw "Work tree not clean"
-  endif
-endfunction
-
-function! init#CheckedBranchOrThrow()
-  let output = init#FugitiveExecuteOrThrow(["rev-parse", "--abbrev-ref", "HEAD"], "Not inside repo!")
-  return output[0]
-endfunction
-
-function init#TryCall(what, ...)
-  let Partial = function(a:what, a:000)
-  try
-    return Partial()
-  catch
-    echom v:exception
-  endtry
-endfunction
-
-function! init#SwitchToBranchOrThrow(arg)
-  call init#WorkTreeCleanOrThrow()
-
-  call init#FugitiveExecuteOrThrow(["checkout", a:arg], "Failed to checkouot " .. a:arg)
-  call init#FugitiveExecuteOrThrow(["submodule", "update", "--init", "--recursive"], "Submodule update failed!")
-endfunction
-
-function! s:GetRefs(ref_dirs, arg)
-  let result = []
-  let dirs = map(a:ref_dirs, 'FugitiveGitDir() . "/" . v:val')
-  for dir in dirs
-    if isdirectory(dir)
-      let pat = dir . ".*" . a:arg . ".*"
-      let result += Find(dir, "-type", "f", "-regex", pat, "-printf", "%P\n")
-    endif
-  endfor
-  return result
-endfunction
-
-function! s:OpenBranchBuffer()
-  let cmd = ["for-each-ref", "--sort=-committerdate", "refs/heads/", "--format=%(refname:short)"]
-  let branches = init#FugitiveExecuteOrThrow(cmd)
-  call filter(branches, '!empty(v:val)')
-  call init#CreateCustomQuickfix('Branches', branches, '<SID>SelectBranch')
-endfunction
-
-function! s:SelectBranch()
-  let branch = getline('.')
-  quit
-  call init#TryCall("init#SwitchToBranchOrThrow", branch)
-endfunction
-
-function s:Branch(args)
-  if empty(a:args)
-    call init#TryCall("s:OpenBranchBuffer")
-  else
-    call init#TryCall("init#SwitchToBranchOrThrow", a:args)
-  endif
-endfunction
-
-command! -nargs=? -complete=customlist,BranchCompl Branch call s:Branch(<q-args>)
-
-function! BranchCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  return s:GetRefs(['refs/heads', 'refs/tags'], a:ArgLead)
-endfunction
-
-command! -nargs=1 -bang -complete=customlist,OriginCompl Origin
-      \ call init#TryCall("init#SwitchToBranchOrThrow", <q-args>)
-
-function! init#ShowErrors(errors)
-  let errors = map(a:errors, "strtrans(v:val)")
-  if empty(errors)
-    let errors = ["<No errors to show>"]
-  endif
-
-  let nr = init#CreateCustomBuffer('Errors', errors)
-  bot sp
-  exe "b " .. nr
-endfunction
-
-function! s:UpdateBranch(bang)
-  let branch = FugitiveHead()
-  let check_file = printf("%s/refs/remotes/origin/%s", FugitiveGitDir(), branch)
-  if !filereadable(check_file)
-    call init#Warn("Could not find origin/" .. branch)
-  endif
-
-  let args = ["fetch", "origin", branch]
-  call init#FugitiveExecuteOrThrow(args, "Failed to fetch!")
-
-  const range = printf("%s..origin/%s", branch, branch)
-  let args = ["log", "--pretty=format:%h", range]
-  let output = init#FugitiveExecuteOrThrow(args, "Failed to log changes!")
-  const commits = filter(output, "!empty(v:val)")
-
-  if len(commits) <= 0
-    echo "No changes."
-    return
-  endif
-
-  if !empty(a:bang)
-    let args = ["reset", "--hard", "origin/" .. branch]
-    let msg = "Force reset failed. Dirty repo?"
-  else
-    let args = ["merge", "--ff-only", "origin/" .. branch]
-    let msg = "Merge failed. Conflicts?"
-  endif
-  call init#FugitiveExecuteOrThrow(args, msg)
-  exe printf("G log -n %d %s", len(commits), commits[0])
-endfunction
-
-command! -bang -nargs=0 Pull call init#TryCall('s:UpdateBranch', "<bang>")
-
-function! s:PushBranch(force)
-  if a:force
-    call init#FugitiveExecuteOrThrow(["push", "--force", "origin", "HEAD"])
-  else
-    call init#WorkTreeCleanOrThrow()
-    call init#FugitiveExecuteOrThrow(["push", "origin", "HEAD"])
-  endif
-  if s:is_work_pc
-    let issue = work#BranchIssueNumber()
-    if !empty(issue)
-      return work#OpenJira(issue)
-    endif
-  endif
-  echo "Up to date with origin."
-endfunction
-
-command! -nargs=0 -bang Push call init#TryCall('s:PushBranch', <bang>0)
-
-function! OriginCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  " XXX: Prefer not to throw exceptions
-  call FugitiveExecute(['fetch', 'origin'])
-  return s:GetRefs(['refs/remotes/origin'], a:ArgLead)
-endfunction
-
-function! init#Unique(list)
-  let idx = 0
-  let hash_map = #{}
-  for item in a:list
-    if !has_key(hash_map, item)
-      let hash_map[item] = idx
-      let idx += 1
-    endif
-  endfor
-  let order = sort(items(hash_map), {a, b -> a[1] - b[1]})
-  return map(order, 'v:val[0]')
-endfunction
-
-function! s:RecentRefs(max_refs)
-  let max_refs = a:max_refs
-  if type(max_refs) == v:t_number
-    let max_refs = string(max_refs)
-  endif
-  let dict = FugitiveExecute(["reflog", "-n", max_refs, "--pretty=format:%H"])
-  if dict['exit_status'] != 0
-    return []
-  endif
-  let hashes = init#Unique(dict['stdout'])
-  let dict = FugitiveExecute(["name-rev", "--annotate-stdin", "--name-only"], #{stdin: hashes})
-  if dict['exit_status'] != 0
-    return []
-  endif
-  let refs = dict['stdout']
-  call filter(refs, "!empty(v:val)")
-  return refs
-endfunction
-
-command -nargs=1 -bang -complete=customlist,ReflogCompl Reflog
-      \ call init#TryCall("init#SwitchToBranchOrThrow", <q-args>)
-
-cabbr Ref Reference
-
-function! ReflogCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  let refs = s:RecentRefs(30)
-  call filter(refs, "stridx(v:val, a:ArgLead) >= 0")
-  return refs[1:]
-endfunction
-
-function! init#CreateCustomBuffer(name, lines)
-  let nr = bufadd(a:name)
-  call setbufvar(nr, '&buftype', 'nofile')
-  call setbufvar(nr, '&bufhidden', 'wipe')
-  call bufload(nr)
-  call setbufvar(nr, '&modifiable', v:true)
-  call setbufline(nr, 1, a:lines)
-  call setbufvar(nr, '&modifiable', v:false)
-  call setbufvar(nr, '&modified', v:false)
-  return nr
-endfunction
-
-function! init#CreateCustomQuickfix(name, lines, cb)
-  let nr = init#CreateCustomBuffer('History', a:lines)
-  bot sp
-  resize 10
-  exe "b " .. nr
-  setlocal cursorline
-  exe "nnoremap <silent> <buffer> <CR> :call " .. a:cb .. "()<CR>"
-  return nr
-endfunction
-
-function! init#OnTermClose(bufnr, Cb)
-  let status = v:event['status']
-  if status == 0
-    exe "bw " .. a:bufnr
-    call a:Cb()
-  endif
-endfunction
-
-function! init#OnJobFinished(id, cb)
-  let id = str2nr(a:id)
-  let info = nvim_get_chan_info(id)
-  let nr = info["buffer"]
-  if type(a:cb) == v:t_string
-    let Cb = function(a:cb)
-  elseif type(a:cb) == v:t_func
-    let Cb = a:cb
-  else
-    echo "Dude what?"
-    return
-  endif
-  exe printf("autocmd TermClose <buffer=%d> ++once call init#OnTermClose(%d, %s)", nr, nr, string(Cb))
-endfunction
-
-function! s:DanglingCommits()
-  let refs = s:RecentRefs(100)
-  call filter(refs, 'v:val =~# "^\\x*$"')
-  call init#CreateCustomQuickfix('Dangling commits', refs, '<SID>VisitCommit')
-endfunction
-
-function! s:VisitCommit()
-  let ns = nvim_create_namespace('dangling_commits')
-  call nvim_buf_set_extmark(bufnr(), ns, line('.') - 1, 0, #{line_hl_group: "Conceal"})
-  exe "G log " .. getline(".")
-endfunction
-
-command! -nargs=0 Dangle call s:DanglingCommits()
-
-function! init#MasterOrThrow(remote)
-  if a:remote
-    let refs_dir = 'refs/remotes'
-    let candidates = ['origin/obsidian-master', 'origin/master', 'origin/main']
-  else
-    let refs_dir = 'refs/heads'
-    let candidates = ['obsidian-master', 'master', 'main']
-  endif
-  let branches = s:GetRefs([refs_dir], 'ma')
-  for candidate in candidates
-    if index(branches, candidate) >= 0
-      return candidate
-    endif
-  endfor
-  throw "Failed to determine mainline."
-endfunction
-
-function! init#HashOrThrow(commitish)
-  let msg = "Failed to parse " .. a:commitish
-  let output = init#FugitiveExecuteOrThrow(["rev-parse", a:commitish], msg)
-  return output[0]
-endfunction
-
-function! init#BranchCommitsOrThrow(branch, main)
-  let range = printf("%s..%s", a:main, a:branch)
-  let cmd = ["log", range, "--pretty=format:%H"]
-  return init#FugitiveExecuteOrThrow(cmd, "Revision range failed!")
-endfunction
-
-function! init#CommonParentOrThrow(branch, main)
-  let range = init#BranchCommitsOrThrow(a:branch, a:main)
-  let branch_first = range[-1]
-  if empty(branch_first)
-    " 'branch' and 'main' are the same commits
-    return a:main
-  endif
-  " Go 1 back to find the common commit
-  let msg = "Failed to go back 1 commit from " . branch_first
-  let output = init#FugitiveExecuteOrThrow(["rev-parse", branch_first . "~1"], msg)
-  return output[0]
-endfunction
-
-function! init#RefExistsOrThrow(commit)
-  let msg = "Unknown ref to git: " . a:commit
-  call init#FugitiveExecuteOrThrow(["show", a:commit], msg)
-endfunction
-
-function! s:BaselineOrThrow(...)
-  let arg = get(a:000, 0, '')
-  call init#InsideGitOrThrow()
-  " Determine main branch
-  let head = init#HashOrThrow("HEAD")
-  let mainline = empty(arg) ? init#MasterOrThrow(v:true) : arg
-  call init#RefExistsOrThrow(mainline)
-  return init#CommonParentOrThrow(head, mainline)
-endfunction
-
-command! -nargs=? -complete=customlist,BranchCompl Base echo init#TryCall("s:BaselineOrThrow", <q-args>)
-
-function! s:SquashOrThrow(arg)
-  let bpoint = s:BaselineOrThrow(a:arg)
-  exe "Git rebase -i " .. bpoint
-endfunction
-
-command! -nargs=? -complete=customlist,BranchCompl Squash call init#TryCall("s:SquashOrThrow", <q-args>)
-
-function! s:FetchRebaseOrThrow()
-  let main = init#MasterOrThrow(v:false)
-  call init#FugitiveExecuteOrThrow(["fetch", "origin", main])
-  call init#FugitiveExecuteOrThrow(["rebase", "origin/" .. main])
-  echo "Rebased onto fresh origin/"  .. main
-endfunction
-
-command! -nargs=0 Rebase call init#TryCall('s:FetchRebaseOrThrow')
-
-function! s:ShowBranchCommitsOrThrow()
-  let bpoint = s:BaselineOrThrow()
-  exe printf("G log %s..HEAD", bpoint)
-endfunction
-
-command! -nargs=0 Changes call init#TryCall('s:ShowBranchCommitsOrThrow')
-
-function! s:Review(arg)
-  " Refresh current state of review
-  if exists("g:review_stack")
-    let items = g:review_stack[-1]
-    call DisplayInQf(items, "Review")
-    echo "Review in progress, refreshing quickfix..."
-    return
-  endif
-
-  let bpoint = s:BaselineOrThrow(a:arg)
-  " Load files for review.
-  " If possible, make the diff windows editable by not passing a ref to fugitive
-  if get(a:, "arg", "") == "HEAD"
-    exe "Git difftool --name-only"
-    let bufs = map(getqflist(), "v:val.bufnr")
-    call map(bufs, 'setbufvar(v:val, "commitish", "0")')
-  else
-    exe "Git difftool --name-only " . bpoint
-    let bufs = map(getqflist(), "v:val.bufnr")
-    call map(bufs, 'setbufvar(v:val, "commitish", bpoint)')
-  endif
-  call setqflist([], 'a', #{title: "Review"})
-  let entries = getqflist()
-  if empty(getqflist())
-    echo "Nothing to show."
-    cclose
-  else
-    let g:review_stack = [getqflist()]
-  endif
-endfunction
-
-command! -nargs=? -complete=customlist,BranchCompl Review call init#TryCall("s:Review", <q-args>)
-
-command! -nargs=0 D Review HEAD
-command! -nargs=* R execute "Review " .. <q-args>
-
-function! s:CompleteFiles(cmd_bang, arg) abort
-  if !exists("g:review_stack")
-    echo "Start a review first"
-    return
-  endif
-  " Close diff
-  if s:DiffFugitiveWinid() >= 0
-    call s:ToggleDiff()
-  endif
-
-  let new_items = copy(g:review_stack[-1])
-  if !empty(a:arg)
-    let idx = printf("stridx(bufname(v:val.bufnr), %s)", string(a:arg))
-    let comp = a:cmd_bang == "!" ? " != " : " == "
-    let new_items = filter(new_items, idx . comp . "-1")
-    let n = len(g:review_stack[-1]) - len(new_items)
-    echo "Completed " . n . " files"
-  else
-    let comp = a:cmd_bang == "!" ? " == " : " != "
-    let bufnr = bufnr(FugitiveReal(bufname("%")))
-    let new_items = filter(new_items, "v:val.bufnr" . comp . bufnr)
-  endif
-  call add(g:review_stack, new_items)
-  if empty(new_items)
-    call init#Warn("Review completed")
-    unlet g:review_stack
-  else
-    call DisplayInQf(new_items, "Review")
-    cc
-  endif
-endfunction
-
-function CompleteCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  if !exists('g:review_stack')
-    return []
-  endif
-  return SplitItems(g:review_stack[-1], a:ArgLead)
-endfunction
-
-command! -bang -nargs=? -complete=customlist,CompleteCompl Complete  call <SID>CompleteFiles('<bang>', <q-args>)
-
-function! s:PostponeFile()
-  if !exists("g:review_stack")
-    echo "Start a review first"
-    return
-  endif
-  let list = g:review_stack[-1]
-  let nrs = map(copy(list), "v:val.bufnr")
-  let idx = index(nrs, bufnr())
-  if idx < 0
-    return
-  endif
-  let item = remove(list, idx)
-  call add(list, item)
-
-  " Close diff
-  if s:DiffFugitiveWinid() >= 0
-    call s:ToggleDiff()
-  endif
-  " Refresh quickfix
-  call DisplayInQf(list, "Review")
-  cc
-endfunction
-
-nnoremap <silent> <leader>ok <cmd>Complete<CR>
-nnoremap <silent> <leader>nok <cmd>call <SID>PostponeFile()<CR>
-
-function! s:UncompleteFiles()
-  if !exists("g:review_stack")
-    echo "Start a review first"
-    return
-  endif
-  if len(g:review_stack) > 1
-    call remove(g:review_stack, -1)
-    let items = g:review_stack[-1]
-    call DisplayInQf(items, "Review")
-  endif
-endfunction
-
-command! -nargs=0 Uncomplete call <SID>UncompleteFiles()
-
-function! s:Pickaxe(keyword)
-  call init#InsideGitOrThrow()
-  " Determine branch.
-  let head = init#HashOrThrow("HEAD")
-  let mainline = init#MasterOrThrow(v:false)
-  let commits = init#BranchCommitsOrThrow(head, mainline)
-  " Add a fake commit for unstanged changes
-  call add(commits, "0000000000000000000000000000000000000000")
-  " Get changed files.
-  let cmd = ["diff", "HEAD~" .. len(commits), "--name-only"]
-  let files = init#FugitiveExecuteOrThrow(cmd, "Collecting changed files failed!")
-  call map(files, 'FugitiveFind(v:val)')
-  " Run git bame on each file
-  let output = []
-  for file in files
-    let dict = FugitiveExecute(["blame", "-p", "--", file])
-    if dict['exit_status'] != 0
-      " File might have been deleted
-      continue
-    endif
-    let blame = dict['stdout']
-    let idx = 0
-    while idx < len(blame)
-      if blame[idx] =~# '^\x\{40\}'
-        let [_, commit, orig_lnum, lnum; _] = matchlist(blame[idx], '\(\x*\) \(\d*\) \(\d*\)')
-        if index(commits, commit) >= 0
-          while blame[idx][0] != "\t"
-            let idx += 1
-          endwhile
-          if stridx(blame[idx], a:keyword) >= 0
-            call add(output, #{filename: file, lnum: lnum, text: blame[idx][1:]})
-          endif
-        endif
-      endif
-      let idx += 1
-    endwhile
-  endfor
-  call DisplayInQf(output, 'Pickaxe')
-endfunction
-
-command! -nargs=0 Todo call init#TryCall('s:Pickaxe', 'TODO')
-command! -nargs=* Pickaxe call init#TryCall('s:Pickaxe', <q-args>)
-" }}}
-
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:NextItem(dir)
-  if s:DiffFugitiveWinid() >= 0
+  if git#DiffWinid() >= 0
     if a:dir == "prev"
       exe "normal! [c"
     elseif a:dir == "next"
@@ -1363,7 +821,7 @@ nnoremap <silent> [C :call <SID>NextItem("first")<CR>
 nnoremap <silent> ]C :call <SID>NextItem("last")<CR>
 
 function! s:ToggleQf()
-  if s:DiffFugitiveWinid() < 0
+  if git#DiffWinid() < 0
     if IsQfOpen()
       cclose
     else
@@ -1452,8 +910,8 @@ function! s:OpenHeader()
   call QuickFind(FugitiveWorkTree(), "-iname", glob)
 endfunction
 
-nmap <silent> <leader>cpp :call <SID>OpenSource()<CR>
-nmap <silent> <leader>hpp :call <SID>OpenHeader()<CR>
+nmap <silent> <leader>cp :call <SID>OpenSource()<CR>
+nmap <silent> <leader>hp :call <SID>OpenHeader()<CR>
 
 function! s:OpenCMakeLists()
   let dir = expand("%:p:h")
@@ -1474,6 +932,54 @@ endfunction
 
 command! -nargs=0 Cmake call s:OpenCMakeLists()
 
+function! s:OpenClangd()
+  let repo = FugitiveWorkTree()
+  if len(repo) <= 0
+    return
+  endif
+  let file = printf("%s/.clangd", repo)
+  if !filereadable(file)
+    echo "Does not exist!"
+    return
+  endif
+  sp
+  exe "e " .. file
+
+  let lnum = search("CompilationDatabase:")
+  if lnum < 0
+    echo "Missing CompilationDatabase!"
+    return
+  endif
+
+  let expected = printf("  CompilationDatabase: %s/%s", repo, g:BUILD_TYPE)
+  if getline('.') != expected
+    call setline('.', expected)
+    w
+  else
+    echo "Was OK."
+  endif
+endfunction
+
+command! -nargs=0 Clangd call s:OpenClangd()
+
+function! s:OpenCompileCommands()
+  let repo = FugitiveWorkTree()
+  let regex = '"file": .*' .. expand("%:t")
+  if len(repo) <= 0
+    return
+  endif
+  let file = printf("%s/%s/compile_commands.json", repo, g:BUILD_TYPE)
+  if !filereadable(file)
+    echo "Does not exist!"
+    return
+  endif
+  let g:qsearch_exclude_dirs = []
+  let g:qsearch_exclude_files = []
+  call QuickGrepNoExclude(regex, file)
+endfunction
+
+command! -nargs=0 CompileCommands call s:OpenCompileCommands()
+
 function! s:OpenCMakeCache()
   let repo = FugitiveWorkTree()
   let cache_file = printf("%s/%s/CMakeCache.txt", repo, g:BUILD_TYPE)
@@ -1484,43 +990,6 @@ function! s:OpenCMakeCache()
 endfunction
 
 command! -nargs=0 Cache call s:OpenCMakeCache()
-
-function! s:EditFugitive()
-  let actual = bufname()
-  let real = FugitiveReal()
-  if actual != real
-    let pos = getpos(".")
-    exe "edit " . FugitiveReal()
-    call setpos(".", pos)
-  endif
-endfunction
-
-nnoremap <silent> <leader>fug :call <SID>EditFugitive()<CR>
-
-function! s:FugitiveCommit()
-  " return split(FugitiveParse()[0], ":")[0]
-  return FugitiveParse()[0]
-endfunction
-
-nnoremap <silent> <leader>com <cmd> exe "Gedit " .. <SID>FugitiveCommit()<CR>
-
-" TODO init#SwitchToBranchOrThrow with FugitiveCommit?
-
-function! s:Context(reverse)
-  call search('^\(@@ .* @@\|[<=>|]\{7}[<=>|]\@!\)', a:reverse ? 'bW' : 'W')
-endfunction
-
-nnoremap <silent> [n :call <SID>Context(v:true)<CR>
-nnoremap <silent> ]n :call <SID>Context(v:false)<CR>
-
-function! s:ContextMotion()
-  call s:Context(v:false)
-  let end = line('.')
-  call s:Context(v:true)
-  exe printf("normal V%dG", end)
-endfunction
-
-omap an <cmd>call <SID>ContextMotion()<CR>
 
 function! s:FoldMotion()
   normal V[z]z
@@ -1657,7 +1126,6 @@ function! ExeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  " Can't use Find() since it ignores the build folder
   let pat = "*" . a:ArgLead . "*"
   let cmd = ["find", ".", "(", "-path", "**/.git", "-prune", "-false", "-o", "-name", pat, ")"]
   let cmd += ["-type", "f", "-executable", "-printf", "%P\n"]
@@ -1762,15 +1230,19 @@ function! s:DebugStartPost(args)
   command! -nargs=0 Pwd call PromptDebugShowPwd()
   command! -nargs=0 DebugSym call PromptDebugFindSym(expand('<cword>'))
   command! -nargs=? Break call PromptDebugGoToBreakpoint(<q-args>)
+  command! -nargs=0 Quickbreak call s:QuickfixToBreakpoints()
+  command! -nargs=* -bang Mark call s:MarkInstruction("<bang>", <q-args>)
 
   nnoremap <silent> <leader>v <cmd>call PromptDebugEvaluate(expand('<cword>'))<CR>
   vnoremap <silent> <leader>v :<C-u>call PromptDebugEvaluate(init#GetRangeExpr())<CR>
 
-  nnoremap <silent> <leader>br :call PromptDebugSendCommand("br " . init#GetDebugLoc())<CR>
-  nnoremap <silent> <leader>tbr :call PromptDebugSendCommand("tbr " . init#GetDebugLoc())<CR>
-  nnoremap <silent> <leader>unt :call PromptDebugSendCommands("tbr " . init#GetDebugLoc(), "c")<CR>
+  nnoremap <silent> <leader>br :call PromptDebugPlaceBreakpoint(#{pending: 1})<CR>
+  nnoremap <silent> <leader>tbr :call PromptDebugPlaceBreakpoint(#{pending: 1, temp: 1})<CR>
+  nnoremap <silent> <leader>pbr :call PromptDebugPlaceBreakpoint(#{pending: 1, thread: 1})<CR>
+  nnoremap <silent> <leader>unt :call PromptDebugPlaceBreakpoint(#{pending: 1, until: 1})<CR>
   nnoremap <silent> <leader>pc :call PromptDebugGoToPC()<CR>
 
+  call PromptDebugEnableTimings()
   call PromptDebugSendCommand("set debug-file-directory /dev/null")
   call PromptDebugSendCommand("set print asm-demangle on")
   call PromptDebugSendCommand("set print pretty on")
@@ -1791,7 +1263,7 @@ function! s:DebugStartPost(args)
   if has_key(a:args, "proc")
     call PromptDebugSendCommand("attach " . a:args["proc"])
     if has_key(a:args, "br")
-      call PromptDebugSendCommand("br " . a:args['br'])
+      call PromptDebugSendCommand("tbr " . a:args['br'])
       call PromptDebugSendCommand("c")
     endif
   elseif has_key(a:args, "exe")
@@ -1801,7 +1273,7 @@ function! s:DebugStartPost(args)
       call PromptDebugSendCommand("set args " . join(cmdArgs[1:], " "))
     endif
     if has_key(a:args, "br")
-      call PromptDebugSendCommand("br " . a:args['br'])
+      call PromptDebugSendCommand("tbr " . a:args['br'])
     endif
     if !has_key(a:args, "wait")
       if has_key(a:args, "br")
@@ -1843,6 +1315,22 @@ function! s:DebugStopPost()
   highlight LspReferenceText guibg=#51576e gui=underline
 endfunction
 
+function! s:QuickfixToBreakpoints()
+  let str_mapper = '"br " .. fnamemodify(bufname(v:val.bufnr), ":t") .. ":" .. v:val.lnum'
+  let cmd_list = map(getqflist(), str_mapper)
+  for cmd in cmd_list
+    call PromptDebugSendCommand(cmd)
+  endfor
+endfunction
+
+function! s:MarkInstruction(bang, arg)
+  if !empty(a:bang)
+    call PromptDebugClearMarks()
+  else
+    call PromptDebugMarkInstruction(a:arg)
+  endif
+endfunction
+
 function! init#GetDebugLoc()
   let basename = expand("%:t")
   let lnum = line(".")
@@ -1882,7 +1370,19 @@ highlight! link @lsp.typemod.function.defaultLibrary Function
 
 lua require('lsp')
 
-command! -nargs=* Find call QuickFind(getcwd(), "-regex", ".*" .. <q-args> .. ".*")
+function! s:ShowFiles(pat)
+  let pat = ".*" .. a:pat .. ".*"
+  let ret = GetFilesNoExclude(getcwd(), "-regex", pat)
+  call init#CreateCustomQuickfix('Find', ret, '<SID>SelectFile')
+endfunction
+
+function! s:SelectFile()
+  let file = getline('.')
+  quit
+  call init#ToClipboard(file)
+endfunction
+
+command! -nargs=* Find call s:ShowFiles(<q-args>)
 
 command! -nargs=+ Grepo call QuickGrep(<q-args>, FugitiveWorkTree())
 
@@ -1896,7 +1396,7 @@ function! s:GetSource(...)
   endif
   let source = ["c", "cc", "cp", "cxx", "cpp", "CPP", "c++", "C"]
   let regex = '.*\.\(' . join(source, '\|') . '\)'
-  return Find(dir, "-regex", regex)
+  return GetFiles(dir, "-regex", regex)
 endfunction
 
 function! SourceCompl(ArgLead, CmdLine, CursorPos)
@@ -1918,7 +1418,7 @@ function! s:GetHeader(...)
   endif
   let header = ["h", "hh", "H", "hp", "hxx", "hpp", "HPP", "h++", "tcc"]
   let regex = '.*\.\(' . join(header, '\|') . '\)'
-  return Find(dir, "-regex", regex)
+  return GetFiles(dir, "-regex", regex)
 endfunction
 
 function! Header(ArgLead, CmdLine, CursorPos)
@@ -1935,7 +1435,7 @@ function! s:GetWorkFiles()
   if !isdirectory(dir)
     return []
   endif
-  return Find(dir)
+  return GetFiles(dir)
 endfunction
 
 function! WorkFilesCompl(ArgLead, CmdLine, CursorPos)
