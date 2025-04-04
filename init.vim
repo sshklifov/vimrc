@@ -133,6 +133,7 @@ command! -nargs=0 -bang Delete call <SID>Delete('<bang>')
 autocmd BufEnter *.fish setlocal commentstring=#\ %s
 autocmd FileType vim setlocal commentstring=\"\ %s
 autocmd FileType cpp setlocal commentstring=\/\/\ %s
+autocmd BufEnter *.cl setlocal ft=c
 
 " tpope/vim-fugitive
 set diffopt-=horizontal
@@ -973,8 +974,6 @@ function! s:OpenCompileCommands()
     echo "Does not exist!"
     return
   endif
-  let g:qsearch_exclude_dirs = []
-  let g:qsearch_exclude_files = []
   call QuickGrepNoExclude(regex, file)
 endfunction
 
