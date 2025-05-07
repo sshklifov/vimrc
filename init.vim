@@ -93,7 +93,7 @@ let g:netrw_banner = 0
 let g:netrw_keepdir = 0
 
 " sshklifov/qsearch
-let g:qsearch_exclude_dirs = [".cache", ".git", "Debug", "Release", "build"]
+let g:qsearch_exclude_dirs = [".cache", ".git", "Debug", "Release", "RelWithDebInfo", "build"]
 let g:qsearch_exclude_files = ["compile_commands.json"]
 
 " tpope/vim-eunuch
@@ -225,8 +225,31 @@ function! init#OnJobFinished(id, cb)
   exe printf("autocmd TermClose <buffer=%d> ++once call init#OnTermClose(%d, %s)", nr, nr, string(Cb))
 endfunction
 
+function! init#OnJobOutput(cmds, cb)
+  if type(a:cb) == v:t_string
+    let Cb = function(a:cb)
+  elseif type(a:cb) == v:t_func
+    let Cb = a:cb
+  else
+    echo "Dude what?"
+    return
+  endif
+  let WrapCb = {_0, data, _1 -> Cb(data) }
+  return jobstart(a:cmds, #{stdout_buffered: v:true, on_stdout: WrapCb})
+endfunction
+
+function! init#BufferIsOpen(bufname)
+  let nr = bufnr(a:bufname)
+  for win in range(1, winnr('$'))
+    if winbufnr(win) == nr
+      return v:true
+    endif
+  endfor
+  return v:false
+endfunction
+
 function! init#CreateCustomQuickfix(name, lines, cb)
-  let nr = init#CustomBottomBuffer('History', a:lines)
+  let nr = init#CustomBottomBuffer(a:name, a:lines)
   resize 10
   setlocal cursorline
   if type(a:cb) == v:t_string
@@ -1407,6 +1430,8 @@ endfunction
 
 command! -nargs=? -complete=customlist,SourceCompl Source call s:GetSource()->FileFilter(<q-args>)->DropInQf('Source')
 
+command! -nargs=? -complete=customlist,SourceCompl S exe "Source " .. <q-args>
+
 function! s:GetHeader(...)
   let dir = get(a:000, 0, '')
   if empty(dir)
@@ -1597,7 +1622,7 @@ function! init#RemotePid(host, proc)
   return pid[0]
 endfunction
 
-function! init#RemoteAttach(host, proc)
+function! init#RemoteAttach(host, proc, ...)
   if a:proc =~ '^[0-9]\+$'
     let pid = a:proc
   else
@@ -1605,6 +1630,9 @@ function! init#RemoteAttach(host, proc)
   endif
   if pid > 0
     let opts = #{ssh: a:host, proc: pid}
+    if a:0 > 0 && a:1
+      let opts['br'] = init#GetDebugLoc()
+    endif
     call init#Debug(opts)
   endif
 endfunction
