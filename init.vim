@@ -1552,8 +1552,16 @@ if !exists('s:lsp_files_to_index')
   let s:lsp_files_to_index = #{}
 endif
 
-function! s:Index(wt)
-  let files = s:GetSource(a:wt) + s:GetHeader(a:wt)
+function! s:Index(dir)
+  let not_indexed = keys(filter(copy(s:lsp_files_to_index), 'v:val == 1'))
+  if !empty(not_indexed)
+    echo "Clearing index!"
+    let g:statusline_dict['lsp'] = ''
+    let s:lsp_files_to_index = #{}
+    return
+  endif
+
+  let files = s:GetSource(a:dir) + s:GetHeader(a:dir)
   for file in files
     if !has_key(g:lsp_status, file)
       let s:lsp_files_to_index[file] = 1
