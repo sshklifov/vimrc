@@ -342,7 +342,7 @@ function! init#ToClipboard(msg)
   endif
 endfunction
 
-function s:ScriptLocalVars()
+function! s:ScriptLocalVars()
   tabnew
   setlocal buftype=nofile
   setlocal bufhidden=wipe
@@ -354,6 +354,28 @@ function s:ScriptLocalVars()
 endfunction
 
 command! -nargs=0 Vars call s:ScriptLocalVars()
+
+if !exists('s:recent_buffers')
+  let s:recent_buffers = #{}
+endif
+
+function! s:OnBufferEnter()
+  let nr = expand("<abuf>")
+  let s:recent_buffers[nr] = localtime()
+endfunction
+
+function! s:RecentBuffers()
+  let buffers = map(keys(s:recent_buffers), 'str2nr(v:val)')
+  call filter(buffers, 'bufexists(v:val) && filereadable(bufname(v:val))')
+  call sort(buffers, {a, b -> s:recent_buffers[b] - s:recent_buffers[a]})
+  call map(buffers, '#{bufnr: v:val, text: strftime("%T", s:recent_buffers[v:val])}')
+  call DisplayInQf(buffers, 'Recent buffers')
+endfunction
+
+command! -nargs=0 Buffers call s:RecentBuffers()
+command! -nargs=0 Recent call s:RecentBuffers()
+
+autocmd BufEnter * call s:OnBufferEnter()
 
 " Open vimrc quick (muy importante)
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
