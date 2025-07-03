@@ -225,6 +225,14 @@ function! init#OnJobFinished(id, cb)
   exe printf("autocmd TermClose <buffer=%d> ++once call init#OnTermClose(%d, %s)", nr, nr, string(Cb))
 endfunction
 
+function! init#OnTermClose(bufnr, Cb)
+  let status = v:event['status']
+  if status == 0
+    exe "bw " .. a:bufnr
+    call a:Cb()
+  endif
+endfunction
+
 function! init#OnJobOutput(cmds, cb)
   if type(a:cb) == v:t_string
     let Cb = function(a:cb)
@@ -261,16 +269,7 @@ function! init#CreateCustomQuickfix(name, lines, cb)
     return -1
   endif
   exe "nnoremap <silent> <buffer> <CR> :call " .. string(Cb) .. "()<CR>"
-  exe printf("autocmd TermClose <buffer=%d> ++once call init#OnTermClose(%d, %s)", nr, nr, string(Cb))
   return nr
-endfunction
-
-function! init#OnTermClose(bufnr, Cb)
-  let status = v:event['status']
-  if status == 0
-    exe "bw " .. a:bufnr
-    call a:Cb()
-  endif
 endfunction
 
 function! init#Unique(list)
@@ -416,6 +415,10 @@ cabbr Tab tab
 
 cabbr Q q
 cabbr Qa qa
+
+cabbr Rgrpe Rgrep
+cabbr Rgpre Rgrep
+
 
 " Annoying quirks
 set updatecount=0
@@ -928,7 +931,7 @@ function! s:OpenSource()
 
   " Default to search in root of workspace
   let glob = expand("%:t:r") . ".c*"
-  call QuickFind(FugitiveWorkTree(), "-iname", glob)
+  call qsearch#Find(FugitiveWorkTree(), "-iname", glob)
 endfunction
 
 function! s:OpenHeader()
@@ -953,7 +956,7 @@ function! s:OpenHeader()
 
   " Default to search in root of workspace
   let glob = expand("%:t:r") . ".h*"
-  call QuickFind(FugitiveWorkTree(), "-iname", glob)
+  call qsearch#Find(FugitiveWorkTree(), "-iname", glob)
 endfunction
 
 nmap <silent> <leader>cp :call <SID>OpenSource()<CR>
@@ -1019,7 +1022,7 @@ function! s:OpenCompileCommands()
     echo "Does not exist!"
     return
   endif
-  call QuickGrepNoExclude(regex, file)
+  call qsearch#GrepNoExclude(regex, file)
 endfunction
 
 command! -nargs=0 CompileCommands call s:OpenCompileCommands()
@@ -1398,6 +1401,25 @@ command! -nargs=0 LspStop lua vim.lsp.stop_client(vim.lsp.get_active_clients())
 command! -nargs=0 LspProg lua print(vim.inspect(vim.lsp.status()))
 
 command! -nargs=0 -range For lua vim.lsp.buf.format{ range = {start= {<line1>, 0}, ["end"] = {<line2>, 0}} }
+nnoremap <expr> <leader>for init#Operator("For", 1)
+
+function! init#Operator(cmd, pending)
+  let &operatorfunc = function('s:OperatorImpl', [a:cmd])
+  if a:pending
+    return 'g@'
+  else
+    return 'g@_'
+  endif
+endfunction
+
+function! s:OperatorImpl(cmd, type)
+  if a:type != "line"
+    return
+  endif
+  let firstline = line("'[")
+  let lastline = line("']")
+  exe printf("%d,%d%s", firstline, lastline, a:cmd)
+endfunction
 
 " Document highlight
 highlight LspReferenceText guibg=#51576e gui=underline
@@ -1416,7 +1438,7 @@ lua require('lsp')
 
 function! s:ShowFiles(pat)
   let pat = ".*" .. a:pat .. ".*"
-  let ret = GetFilesNoExclude(getcwd(), "-regex", pat)
+  let ret = qsearch#GetFilesNoExclude(getcwd(), "-regex", pat)
   call init#CreateCustomQuickfix('Find', ret, '<SID>SelectFile')
 endfunction
 
@@ -1428,7 +1450,7 @@ endfunction
 
 command! -nargs=* Find call s:ShowFiles(<q-args>)
 
-command! -nargs=+ Grepo call QuickGrep(<q-args>, FugitiveWorkTree())
+command! -nargs=+ Grepo call qsearch#Grep(<q-args>, FugitiveWorkTree())
 
 function! s:GetSource(...)
   let dir = get(a:000, 0, '')
@@ -1440,7 +1462,7 @@ function! s:GetSource(...)
   endif
   let source = ["c", "cc", "cp", "cxx", "cpp", "CPP", "c++", "C"]
   let regex = '.*\.\(' . join(source, '\|') . '\)'
-  return GetFiles(dir, "-regex", regex)
+  return qsearch#GetFiles(dir, "-regex", regex)
 endfunction
 
 function! SourceCompl(ArgLead, CmdLine, CursorPos)
@@ -1464,7 +1486,7 @@ function! s:GetHeader(...)
   endif
   let header = ["h", "hh", "H", "hp", "hxx", "hpp", "HPP", "h++", "tcc"]
   let regex = '.*\.\(' . join(header, '\|') . '\)'
-  return GetFiles(dir, "-regex", regex)
+  return qsearch#GetFiles(dir, "-regex", regex)
 endfunction
 
 function! Header(ArgLead, CmdLine, CursorPos)
@@ -1481,7 +1503,7 @@ function! s:GetWorkFiles()
   if !isdirectory(dir)
     return []
   endif
-  return GetFiles(dir)
+  return qsearch#GetFiles(dir)
 endfunction
 
 function! WorkFilesCompl(ArgLead, CmdLine, CursorPos)
@@ -1620,6 +1642,32 @@ function! UpdateLspStatus(key, value)
     redrawstatus
   endif
 endfunction
+
+function! s:EditRecentSource()
+  if &ft == 'c' || &ft == 'cpp'
+    return
+  endif
+
+  let repo = FugitiveWorkTree()
+  if empty(repo)
+    return
+  endif
+
+  for file in v:oldfiles
+    if filereadable(file) && stridx(file, repo) >= 0
+      exe "edit " .. file
+      return
+    endif
+  endfor
+endfunction
+
+function! s:SmartWorkspaceSymbol()
+  call s:EditRecentSource()
+  lua vim.lsp.buf.workspace_symbol()
+endfunction
+
+nnoremap <silent> gS <cmd>call <SID>SmartWorkspaceSymbol()<CR>
+
 "}}}
 
 """"""""""""""""""""""""""""Remote"""""""""""""""""""""""""""" {{{

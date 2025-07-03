@@ -215,7 +215,7 @@ function ShowAutoCompletion(...)
     if err or not res or vim.tbl_isempty(res) then
       return
     end
-    local complete_items = vim.lsp._completion._lsp_to_complete_items(res, prefix)
+    local complete_items = vim.lsp.completion._lsp_to_complete_items(res, prefix)
     if vim.tbl_isempty(complete_items) then
       return
     end
@@ -269,8 +269,8 @@ local OnCclsAttach = function(_, bufnr)
   buf_set_keymap('n', '<leader>rn', '<cmd>lua vim.lsp.buf.rename()<CR>', opts)
   buf_set_keymap('n', '<leader>qf', '<cmd>lua vim.lsp.buf.code_action()<CR>', opts)
 
-  buf_set_keymap('n', 'gs', '<cmd>lua vim.lsp.buf.document_symbol()<CR>', opts)
-  buf_set_keymap('n', 'gS', '<cmd>lua vim.lsp.buf.workspace_symbol()<CR>', opts)
+  buf_set_keymap('n', 'gs', '<cmd>lua vim.lsp.buf.document_symbol({loclist = false})<CR>', opts)
+  -- gS(workspace_symbol) is implemented in init.vim
   buf_set_keymap('n', 'gr', '<cmd>lua vim.lsp.buf.references()<CR>', opts)
   buf_set_keymap('n', '[d', '<cmd>lua vim.diagnostic.goto_prev({severity = vim.diagnostic.severity.ERROR})<CR>', opts)
   buf_set_keymap('n', ']d', '<cmd>lua vim.diagnostic.goto_next({severity = vim.diagnostic.severity.ERROR})<CR>', opts)
@@ -294,6 +294,10 @@ local OnCclsAttach = function(_, bufnr)
 end
 
 -- C++ LSP Config
+
+vim.diagnostic.config({
+  virtual_text = true
+})
 
 lspconfig.clangd.setup {
   on_attach = OnCclsAttach,
