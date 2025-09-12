@@ -253,6 +253,60 @@ function GetAutoCompletion()
   return vim.fn.nr2char(9)
 end
 
+function CheckFormat(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local clients = vim.lsp.get_clients({ bufnr = bufnr })
+  local method = "textDocument/formatting"
+  local opts = { timeout_ms = 1000 }
+  local ns = vim.api.nvim_create_namespace("format-check")
+
+  for _, client in ipairs(clients) do
+    if client.supports_method(method) then
+      local params = vim.lsp.util.make_formatting_params({})
+      local result, err = client:request_sync(method, params, opts.timeout_ms, bufnr)
+      if result and result.result then
+        local diags = {}
+        for _, edit in ipairs(result.result) do
+          table.insert(diags, {
+            lnum = edit.range.start.line,
+            col = edit.range.start.character,
+            severity = vim.diagnostic.severity.HINT,
+            source = client.name,
+            message = "Reformat required",
+          })
+        end
+        vim.diagnostic.set(ns, bufnr, diags, {})
+      elseif err then
+        vim.notify(string.format('[LSP][%s] %s', client.name, err), vim.log.levels.WARN)
+      end
+    end
+  end
+end
+
+function ClearFormatDiagnostics(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local ns = vim.api.nvim_create_namespace("format-check")
+  vim.diagnostic.reset(ns, bufnr)
+end
+
+function ToggleFormatCheck(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local group_name = "FormatCheckToggle" .. bufnr
+  local function autocmd(event, cb) api.nvim_create_autocmd({event}, {buffer=bufnr, group=group_name, callback=cb}) end
+
+  vim.api.nvim_create_augroup(group_name, { clear = false })
+  local existing = vim.api.nvim_get_autocmds({ group = group_name })
+  if #existing > 0 then
+    -- Autocmd already exists. Clear it and any diagnostics.
+    vim.api.nvim_clear_autocmds({ group = group_name })
+    ClearFormatDiagnostics(bufnr)
+  else
+    -- Create autocmd and run once.
+    autocmd("BufWritePost", function() CheckFormat(bufnr) end)
+    CheckFormat(bufnr)
+  end
+end
+
 -- Keymaps and registration
 
 local OnCclsAttach = function(_, bufnr)
@@ -282,12 +336,14 @@ local OnCclsAttach = function(_, bufnr)
   user_command("Base", RequestBaseClass, opts)
   user_command("Derived", RequestDerivedClass, opts)
   user_command("Reference", RequestReferenceContainer, opts)
+  user_command("Lint", function() ToggleFormatCheck() end, opts)
+  -- Run format for the first time
+  ToggleFormatCheck(bufnr)
 
   -- Autocommands
   autocmd('CursorHold', function() vim.lsp.buf.document_highlight() end)
   autocmd('CursorHoldI', function() vim.lsp.buf.document_highlight() end)
   autocmd('CursorMoved', function() vim.lsp.buf.clear_references() end)
-
   autocmd('TextChangedI', function() ShowAutoCompletion() end)
 
   buf_set_keymap('i', '<C-space>', '<cmd>lua ShowAutoCompletion({force_pum=true})<CR>', {noremap=true})
@@ -315,34 +371,33 @@ lspconfig.clangd.setup {
 }
 
 -- Python LSP Config
+-- local OnPythonAttach = function(_, bufnr)
+--   local function buf_set_keymap(...) api.nvim_buf_set_keymap(bufnr, ...) end
+--   local function buf_set_option(name, value) api.nvim_set_option_value(name, value, {buf = bufnr}) end
 
-local OnPythonAttach = function(_, bufnr)
-  local function buf_set_keymap(...) api.nvim_buf_set_keymap(bufnr, ...) end
-  local function buf_set_option(name, value) api.nvim_set_option_value(name, value, {buf = bufnr}) end
+--   -- Enable completion triggered by <c-x><c-o>
+--   buf_set_option('omnifunc', 'v:lua.vim.lsp.omnifunc')
 
-  -- Enable completion triggered by <c-x><c-o>
-  buf_set_option('omnifunc', 'v:lua.vim.lsp.omnifunc')
+--   -- Mappings
+--   local opts = { noremap=true, silent=true }
 
-  -- Mappings
-  local opts = { noremap=true, silent=true }
+--   buf_set_keymap('i', '<C-Space>', '<C-X><C-O>', opts)
+--   buf_set_keymap('n', 'gd', '<cmd>lua vim.lsp.buf.definition()<CR>', opts)
+--   buf_set_keymap('n', 'K', '<cmd>lua vim.lsp.buf.hover()<CR>', opts)
+--   buf_set_keymap('i', '<C-k>', '<cmd>lua vim.lsp.buf.signature_help()<CR>', opts)
+--   buf_set_keymap('n', '<leader>rn', '<cmd>lua vim.lsp.buf.rename()<CR>', opts)
 
-  buf_set_keymap('i', '<C-Space>', '<C-X><C-O>', opts)
-  buf_set_keymap('n', 'gd', '<cmd>lua vim.lsp.buf.definition()<CR>', opts)
-  buf_set_keymap('n', 'K', '<cmd>lua vim.lsp.buf.hover()<CR>', opts)
-  buf_set_keymap('i', '<C-k>', '<cmd>lua vim.lsp.buf.signature_help()<CR>', opts)
-  buf_set_keymap('n', '<leader>rn', '<cmd>lua vim.lsp.buf.rename()<CR>', opts)
+--   buf_set_keymap('n', '<leader>sym', '<cmd>lua vim.lsp.buf.document_symbol()<CR>', opts)
+--   buf_set_keymap('n', 'gr', '<cmd>lua vim.lsp.buf.references()<CR>', opts)
+--   buf_set_keymap('n', '[d', '<cmd>lua vim.diagnostic.goto_prev({severity = vim.diagnostic.severity.ERROR;})<CR>', opts)
+--   buf_set_keymap('n', ']d', '<cmd>lua vim.diagnostic.goto_next({severity = vim.diagnostic.severity.ERROR;})<CR>', opts)
+--   buf_set_keymap('n', '<leader>dig', '<cmd>lua vim.diagnostic.setqflist()<CR>', opts)
+-- end
 
-  buf_set_keymap('n', '<leader>sym', '<cmd>lua vim.lsp.buf.document_symbol()<CR>', opts)
-  buf_set_keymap('n', 'gr', '<cmd>lua vim.lsp.buf.references()<CR>', opts)
-  buf_set_keymap('n', '[d', '<cmd>lua vim.diagnostic.goto_prev({severity = vim.diagnostic.severity.ERROR;})<CR>', opts)
-  buf_set_keymap('n', ']d', '<cmd>lua vim.diagnostic.goto_next({severity = vim.diagnostic.severity.ERROR;})<CR>', opts)
-  buf_set_keymap('n', '<leader>dig', '<cmd>lua vim.diagnostic.setqflist()<CR>', opts)
-end
-
-lspconfig.basedpyright.setup{
-  cmd = {"/home/stef/.local/bin/basedpyright-langserver", "--stdio"},
-  on_attach = OnPythonAttach,
-}
+-- lspconfig.basedpyright.setup{
+--   cmd = {"/home/stef/.local/bin/basedpyright-langserver", "--stdio"},
+--   on_attach = OnPythonAttach,
+-- }
 
 -- Lua LSP Config
 
@@ -395,13 +450,13 @@ local OnLuaAttach = function(_, bufnr)
   buf_set_keymap('n', '<leader>dig', '<cmd>lua vim.diagnostic.setqflist()<CR>', opts)
 end
 
-lspconfig.lua_ls.setup {
-  on_init = OnLuaInit,
-  on_attach = OnLuaAttach,
-  settings = {
-    Lua = {}
-  },
-}
+-- lspconfig.lua_ls.setup {
+--   on_init = OnLuaInit,
+--   on_attach = OnLuaAttach,
+--   settings = {
+--     Lua = {}
+--   },
+-- }
 
 -- System clipboard
 

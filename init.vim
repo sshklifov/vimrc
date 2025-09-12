@@ -419,7 +419,6 @@ cabbr Qa qa
 cabbr Rgrpe Rgrep
 cabbr Rgpre Rgrep
 
-
 " Annoying quirks
 set updatecount=0
 set shortmess+=I
@@ -650,7 +649,9 @@ command! -nargs=0 ChooseHighlight call s:ShowHighlights()
 """"""""""""""""""""""""""""IDE maps"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function s:PushCommand(bang)
-  call git#PushCommand(a:bang)
+  if !git#PushCommand(a:bang)
+    return
+  endif
   if s:is_work_pc
     let issue = work#BranchIssueNumber()
     if !empty(issue) && exists('*work#OpenJira')
@@ -1002,14 +1003,28 @@ function! s:OpenClangd()
 
   let expected = printf("  CompilationDatabase: %s/%s", repo, g:BUILD_TYPE)
   if getline('.') != expected
-    call setline('.', expected)
-    w
+    echo "Failed to match!"
   else
     echo "Was OK."
   endif
 endfunction
 
-command! -nargs=0 Clangd call s:OpenClangd()
+function! s:CreateClangd()
+  let repo = FugitiveWorkTree()
+  if empty(repo)
+    echo "Not inside repo!"
+    return
+  endif
+  let file = repo .. "/.clangd"
+  let db = repo .. "/" .. g:BUILD_TYPE
+  top sp
+  exe "e " .. file
+  %delete
+  call append(0, ['CompileFlags:', '  CompilationDatabase: ' .. db])
+  write
+endfunction
+
+command! -nargs=0 -bar -bang Clangd if <bang>0 | call s:CreateClangd() | else | call s:OpenClangd() | endif
 
 function! s:OpenCompileCommands()
   let repo = FugitiveWorkTree()
@@ -1042,7 +1057,12 @@ function! s:FoldMotion()
   normal V[z]z
 endfunction
 
-omap az <cmd>call <SID>FoldMotion()<CR>
+onoremap az <cmd>call <SID>FoldMotion()<CR>
+onoremap <silent> ab :<C-u>normal! [{V]}]<CR>
+xnoremap <silent> ab :<C-u>normal! [{V]}]<CR>
+onoremap <silent> ib :<C-u>normal! [{V]}]<CR>
+xnoremap <silent> ib :<C-u>normal! [{V]}]<CR>
+
 
 function! s:SearchOrStay(pat, flags)
   if getline('.') !~ a:pat
@@ -1402,6 +1422,7 @@ command! -nargs=0 LspProg lua print(vim.inspect(vim.lsp.status()))
 
 command! -nargs=0 -range For lua vim.lsp.buf.format{ range = {start= {<line1>, 0}, ["end"] = {<line2>, 0}} }
 nnoremap <expr> <leader>for init#Operator("For", 1)
+vnoremap <silent> <leader>for :For<CR>
 
 function! init#Operator(cmd, pending)
   let &operatorfunc = function('s:OperatorImpl', [a:cmd])
@@ -1435,20 +1456,6 @@ highlight! link @lsp.typemod.method.defaultLibrary Function
 highlight! link @lsp.typemod.function.defaultLibrary Function
 
 lua require('lsp')
-
-function! s:ShowFiles(pat)
-  let pat = ".*" .. a:pat .. ".*"
-  let ret = qsearch#GetFilesNoExclude(getcwd(), "-regex", pat)
-  call init#CreateCustomQuickfix('Find', ret, '<SID>SelectFile')
-endfunction
-
-function! s:SelectFile()
-  let file = getline('.')
-  quit
-  call init#ToClipboard(file)
-endfunction
-
-command! -nargs=* Find call s:ShowFiles(<q-args>)
 
 command! -nargs=+ Grepo call qsearch#Grep(<q-args>, FugitiveWorkTree())
 
@@ -1489,14 +1496,16 @@ function! s:GetHeader(...)
   return qsearch#GetFiles(dir, "-regex", regex)
 endfunction
 
-function! Header(ArgLead, CmdLine, CursorPos)
+function! HeaderCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
   return s:GetHeader()->TailItems(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,Header Header call s:GetHeader()->FileFilter(<q-args>)->DropInQf('Header')
+command! -nargs=? -complete=customlist,HeaderCompl Header call s:GetHeader()->FileFilter(<q-args>)->DropInQf('Header')
+
+command! -nargs=? -complete=customlist,HeaderCompl H exe "Header " .. <q-args>
 
 function! s:GetWorkFiles()
   let dir = FugitiveWorkTree()
@@ -1514,6 +1523,19 @@ function! WorkFilesCompl(ArgLead, CmdLine, CursorPos)
 endfunction
 
 command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->FileFilter(<q-args>)->DropInQf('Workfiles')
+
+function! s:GetLocalFiles()
+  return qsearch#GetFiles(getcwd())
+endfunction
+
+function! FindCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  return s:GetLocalFiles()->SplitItems(a:ArgLead)
+endfunction
+
+command! -nargs=? -complete=customlist,FindCompl Find call s:GetLocalFiles()->FileFilter(<q-args>)->DropInQf('Find')
 
 function! TypeHierarchyHandler(res, encoding)
   let items = []
