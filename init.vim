@@ -20,6 +20,8 @@ Plug 'sshklifov/qutil'
 Plug 'sshklifov/rsi'
 Plug 'sshklifov/git'
 
+" TODO: Do I want to restore custom quickfix with <leader>cc?
+
 let s:is_work_pc = isdirectory("/opt/aisys")
 if s:is_work_pc
   Plug 'sshklifov/work'
@@ -73,8 +75,7 @@ if s:is_work_pc
 endif
 
 " sshklifov/rsi
-command! -nargs=0 Rest call RsiEnterRest()
-command! -nargs=0 Stats call RsiPrintStats()
+command! -nargs=0 Rest Rsi EnterRest
 
 " sshklifov/debug
 let g:promptdebug_commands = 0
@@ -256,20 +257,34 @@ function! init#BufferIsOpen(bufname)
   return v:false
 endfunction
 
-function! init#CreateCustomQuickfix(name, lines, cb)
+function! init#CreateCommandQuickfix(name, lines, cmd)
   let nr = init#CustomBottomBuffer(a:name, a:lines)
   resize 10
   setlocal cursorline
+  exe "nnoremap <silent> <buffer> <CR> :" .. a:cmd .. '<CR>'
+  let b:custom_quickfix = 1
+  return nr
+endfunction
+
+function! init#CreateCustomQuickfix(name, lines, cb, ...)
   if type(a:cb) == v:t_string
-    let Cb = function(a:cb)
-  elseif type(a:cb) == v:t_func
-    let Cb = a:cb
+    let Cb = function(a:cb, a:000)
   else
-    echo "Dude what?"
+    call init#Warn("Dude what?")
     return -1
   endif
-  exe "nnoremap <silent> <buffer> <CR> :call " .. string(Cb) .. "()<CR>"
-  return nr
+  let cmd = "call " .. string(Cb) .. "()"
+  return init#CreateCommandQuickfix(a:name, a:lines, cmd)
+endfunction
+
+function! init#CreateOneShotQuickfix(name, lines, cb)
+  return init#CreateCustomQuickfix(a:name, a:lines, '<SID>OneShotQuickfix', a:cb)
+endfunction
+
+function s:OneShotQuickfix(cb)
+  let entry = getline('.')
+  quit
+  call function(a:cb)(entry)
 endfunction
 
 function! init#Unique(list)
@@ -664,7 +679,7 @@ command! -nargs=0 -bang Push call s:PushCommand("<bang>")
 
 function! s:ShowHistory(CmdLine)
   let result = init#HistFind(a:CmdLine)
-  call init#CreateCustomQuickfix('History', result, '<SID>SelectCommand')
+  call init#CreateOneShotQuickfix('History', result, '<SID>SelectCommand')
 endfunction
 
 function! s:SelectCommand()
@@ -725,12 +740,11 @@ function! s:ShowSessions(pat)
     echo "Nothing to show."
     return
   endif
-  call init#CreateCustomQuickfix('Sessions', session_files, '<SID>SelectSession')
+  call init#CreateOneShotQuickfix('Sessions', session_files, '<SID>SelectSession')
 endfunction
 
-function! s:SelectSession()
-  let file = getline('.')
-  exe "so " .. file
+function! s:SelectSession(file)
+  exe "so " .. a:file
 endfunction
 
 command! -nargs=0 Load call s:ShowSessions('')
@@ -872,8 +886,9 @@ nnoremap <silent> ]C :call <SID>NextItem("last")<CR>
 
 function! s:ToggleQf()
   if git#DiffWinid() < 0
-    if IsQfOpen()
-      cclose
+    let winids = qutil#GetQuickfix()
+    if !empty(winids)
+      call nvim_win_close(winids[0], v:false)
     else
       copen
     endif
@@ -1024,7 +1039,7 @@ function! s:CreateClangd()
   write
 endfunction
 
-command! -nargs=0 -bar -bang Clangd if <bang>0 | call s:CreateClangd() | else | call s:OpenClangd() | endif
+command! -nargs=0 Clangd call s:CreateClangd()
 
 function! s:OpenCompileCommands()
   let repo = FugitiveWorkTree()
@@ -1675,12 +1690,10 @@ function! s:EditRecentSource()
     return
   endif
 
-  for file in v:oldfiles
-    if filereadable(file) && stridx(file, repo) >= 0
-      exe "edit " .. file
-      return
-    endif
-  endfor
+  let sources = s:GetSource(repo)
+  if !empty(sources)
+    exe "edit " .. sources[0]
+  endif
 endfunction
 
 function! s:SmartWorkspaceSymbol()
