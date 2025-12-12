@@ -63,6 +63,7 @@ set foldopen=block,hor,jump,mark,quickfix,undo
 
 " sshklifov/work
 if s:is_work_pc
+  let g:RSYNC_DIR = "/var/tmp"
   let s:default_host = "p15"
   if !exists('g:HOST')
     let g:HOST = s:default_host
@@ -147,6 +148,24 @@ function! init#GetState()
   return deepcopy(s:)
 endfunction
 
+func init#Get(what, ...)
+  if type(a:what) != v:t_dict && type(a:what) != v:t_list
+    throw "Invalid arguments, expecting dictionary or list"
+  endif
+  let result = a:what
+  let default = a:000[-1]
+  for key in a:000[:-2]
+    if type(result) == v:t_dict && !has_key(result, key)
+      return default
+    endif
+    if type(result) == v:t_list && len(result) >= key
+      return default
+    endif
+    let result = result[key]
+  endfor
+  return result
+endfunc
+
 function! init#AppendChunks(bufnr, lnum, chunks)
   let line = join(map(copy(a:chunks), "v:val[0]"), '')
   if nvim_buf_line_count(a:bufnr) > 0
@@ -211,22 +230,16 @@ function! init#CustomBottomBuffer(name, lines)
   return nr
 endfunction
 
-function! init#OnJobFinished(id, cb)
+function! init#OnTermSuccess(id, cb, ...)
   let id = str2nr(a:id)
   let info = nvim_get_chan_info(id)
   let nr = info["buffer"]
-  if type(a:cb) == v:t_string
-    let Cb = function(a:cb)
-  elseif type(a:cb) == v:t_func
-    let Cb = a:cb
-  else
-    echo "Dude what?"
-    return
-  endif
-  exe printf("autocmd TermClose <buffer=%d> ++once call init#OnTermClose(%d, %s)", nr, nr, string(Cb))
+  call assert_true(type(a:cb) == type(""))
+  let Cb = function(a:cb, a:000)
+  exe printf("autocmd TermClose <buffer=%d> ++once call s:DoTermClose(%d, %s)", nr, nr, string(Cb))
 endfunction
 
-function! init#OnTermClose(bufnr, Cb)
+function! s:DoTermClose(bufnr, Cb)
   let status = v:event['status']
   if status == 0
     exe "bw " .. a:bufnr
@@ -234,20 +247,108 @@ function! init#OnTermClose(bufnr, Cb)
   endif
 endfunction
 
-function! init#OnJobOutput(cmds, cb)
-  if type(a:cb) == v:t_string
-    let Cb = function(a:cb)
-  elseif type(a:cb) == v:t_func
-    let Cb = a:cb
-  else
-    echo "Dude what?"
-    return
-  endif
-  let WrapCb = {_0, data, _1 -> Cb(data) }
-  return jobstart(a:cmds, #{stdout_buffered: v:true, on_stdout: WrapCb})
+function! init#OnBufDelete(nr, cb, ...)
+  call assert_true(type(a:cb) == type(""))
+  let Cb = function(a:cb, a:000)
+  exe printf("autocmd BufWipeout <buffer=%d> ++once call %s()", a:nr, string(Cb))
 endfunction
 
-function! init#BufferIsOpen(bufname)
+function! init#Jobstart(cmds, ...)
+  if a:0 > 0
+    let id = jobstart(a:cmds, a:1)
+  else
+    let id = jobstart(a:cmds)
+  endif
+  if !exists('s:job_list')
+    let s:job_list = []
+  endif
+  if type(a:cmds) == type([])
+    let args = join(a:cmds)
+  else
+    let args = a:cmds
+  endif
+  call add(s:job_list, #{id: id, args: args})
+  return id
+endfunction
+
+function! s:ShowJobs()
+  if !exists('s:job_list')
+    echo "No jobs."
+    return
+  endif
+
+  for j in s:job_list
+    if !has_key(j, 'exitted')
+      silent! let pid = jobpid(j.id)
+      if pid <= 0
+        let j['exitted'] = 1
+      endif
+    endif
+  endfor
+  let lines = map(copy(s:job_list), 'v:val.args')
+  call init#CustomBottomBuffer('Jobs', lines)
+
+  let exitted = map(copy(s:job_list), 'has_key(v:val, "exitted")')
+  let ns = nvim_create_namespace('jobs')
+  for i in range(len(exitted))
+    if exitted[i]
+      call nvim_buf_set_extmark(bufnr(), ns, i, 0, #{line_hl_group: "Conceal"})
+    endif
+  endfor
+endfunction
+
+command! -nargs=0 Jobs call s:ShowJobs()
+
+function! init#OnJobOutput(cmds, cb, ...)
+  call assert_true(type(a:cb) == v:t_string)
+  let Cb = function(a:cb, a:000)
+  let WrapCb = {_0, data, _1 -> Cb(data) }
+  return init#Jobstart(a:cmds, #{stdout_buffered: v:true, on_stdout: WrapCb})
+endfunction
+
+function! init#OnJobExit(cmds, cb, ...)
+  call assert_true(type(a:cb) == v:t_string)
+  let Cb = function(a:cb, a:000)
+  if type(a:cmds) == type([])
+    let job_name = a:cmds[0]
+  else
+    let job_name = split(a:cmds)[0]
+  endif
+  return init#Jobstart(a:cmds, #{on_exit: {_0, code, _2 -> Cb(code)}})
+endfunction
+
+function! init#OnJobSuccess(cmds, cb, ...)
+  call assert_true(type(a:cb) == v:t_string)
+  let Cb = function(a:cb, a:000)
+  if type(a:cmds) == type([])
+    let job_name = a:cmds[0]
+  else
+    let job_name = split(a:cmds)[0]
+  endif
+  return init#Jobstart(a:cmds, #{on_exit: function('s:CheckJobSuccess', [job_name, Cb])})
+endfunction
+
+function s:CheckJobSuccess(job_name, Cb, _0, code, _1)
+  if a:code == 0
+    call a:Cb()
+  else
+    let msg = printf("Job '%s' failed", a:job_name)
+    call init#Warn(msg)
+  endif
+endfunction
+
+function! init#OnJobFail(cmds, cb, ...)
+  call assert_true(type(a:cb) == v:t_string)
+  let Cb = function(a:cb, a:000)
+  if type(a:cmds) == type([])
+    let job_name = a:cmds[0]
+  else
+    let job_name = split(a:cmds)[0]
+  endif
+  return init#Jobstart(a:cmds, #{on_exit: {_0, code, _1 -> code != 0 ? Cb()}})
+endfunction
+
+function! init#IsVisible(bufname)
   let nr = bufnr(a:bufname)
   for win in range(1, winnr('$'))
     if winbufnr(win) == nr
@@ -255,36 +356,6 @@ function! init#BufferIsOpen(bufname)
     endif
   endfor
   return v:false
-endfunction
-
-function! init#CreateCommandQuickfix(name, lines, cmd)
-  let nr = init#CustomBottomBuffer(a:name, a:lines)
-  resize 10
-  setlocal cursorline
-  exe "nnoremap <silent> <buffer> <CR> :" .. a:cmd .. '<CR>'
-  let b:custom_quickfix = 1
-  return nr
-endfunction
-
-function! init#CreateCustomQuickfix(name, lines, cb, ...)
-  if type(a:cb) == v:t_string
-    let Cb = function(a:cb, a:000)
-  else
-    call init#Warn("Dude what?")
-    return -1
-  endif
-  let cmd = "call " .. string(Cb) .. "()"
-  return init#CreateCommandQuickfix(a:name, a:lines, cmd)
-endfunction
-
-function! init#CreateOneShotQuickfix(name, lines, cb)
-  return init#CreateCustomQuickfix(a:name, a:lines, '<SID>OneShotQuickfix', a:cb)
-endfunction
-
-function s:OneShotQuickfix(cb)
-  let entry = getline('.')
-  quit
-  call function(a:cb)(entry)
 endfunction
 
 function! init#Unique(list)
@@ -340,8 +411,13 @@ function! init#Sum(...)
     return res
 endfunction
 
-function! init#Warn(msg)
-  call nvim_echo([[a:msg, "WarningMsg"]], v:true, #{})
+function! init#Warn(msg, ...)
+  let msg = a:msg
+  if len(a:000) > 0
+    let vargs = insert(copy(a:000), msg, 0)
+    let msg = function("printf", vargs)()
+  endif
+  call nvim_echo([[msg, "WarningMsg"]], v:true, #{})
 endfunction
 
 function! init#ToClipboard(msg)
@@ -354,6 +430,27 @@ function! init#ToClipboard(msg)
   else
     echo "Copied to clipboard (truncated)."
   endif
+endfunction
+
+function init#IsWorkspace(str)
+  " SSH connections will report the same workspace (how you last left your desktop).
+  if !empty($SSH_CONNECTION)
+    return v:false
+  endif
+
+  let ws = systemlist("qdbus org.kde.KWin /KWin org.kde.KWin.currentDesktop")
+  if v:shell_error
+    call init#Warn("qdbus command failed!")
+    return v:flase
+  endif
+  return ws[0] == a:str
+endfunction
+
+function init#IsMainWorkspace()
+  if !empty($SSH_MAIN_CONNECTION)
+    return v:true
+  endif
+  return init#IsWorkspace("2")
 endfunction
 
 function! s:ScriptLocalVars()
@@ -378,12 +475,25 @@ function! s:OnBufferEnter()
   let s:recent_buffers[nr] = localtime()
 endfunction
 
+function! init#PrettyTime(secs)
+  let secs = a:secs % 60
+  let mins = (a:secs / 60) % 60
+  let hrs = (a:secs / 60 / 60)
+  if hrs > 0
+    return printf("%dh %dm %ds", hrs, mins, secs)
+  elseif mins > 0
+    return printf("%dm %ds", mins, secs)
+  else
+    return printf("%ds", secs)
+  endif
+endfunction
+
 function! s:RecentBuffers()
   let buffers = map(keys(s:recent_buffers), 'str2nr(v:val)')
   call filter(buffers, 'bufexists(v:val) && filereadable(bufname(v:val))')
   call sort(buffers, {a, b -> s:recent_buffers[b] - s:recent_buffers[a]})
-  call map(buffers, '#{bufnr: v:val, text: strftime("%T", s:recent_buffers[v:val])}')
-  call DisplayInQf(buffers, 'Recent buffers')
+  call map(buffers, '#{bufnr: v:val, text: init#PrettyTime(localtime() - s:recent_buffers[v:val])}')
+  call qutil#SetQuickfix(buffers, 'Recent buffers')
 endfunction
 
 command! -nargs=0 Buffers call s:RecentBuffers()
@@ -394,7 +504,6 @@ autocmd BufEnter * call s:OnBufferEnter()
 " Open vimrc quick (muy importante)
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
 nnoremap <silent> <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
-nnoremap <silent> <leader>dv :e ~/.local/share/nvim/plugged/debug/plugin/promptdebug.vim<CR>
 nnoremap <silent> <leader>wv :e ~/.local/share/nvim/plugged/work/plugin/work.vim<CR>
 
 " Indentation settings
@@ -603,13 +712,18 @@ function! BranchStatusLine()
 endfunction
 
 function! HostStatusLine()
-  if empty(FugitiveWorkTree())
-    return ''
-  endif
   if exists('g:HOST') && g:HOST != s:default_host
-    return "(" .. g:HOST .. ")"
+    if !work#GetHostStatus()
+      return "(- " .. g:HOST .. ")"
+    else
+      return "(" .. g:HOST .. ")"
+    endif
    else
-     return ''
+    if !work#GetHostStatus()
+      return "(- " .. g:HOST .. ")"
+    else
+      return ""
+    endif
    endif
 endfunction
 
@@ -679,13 +793,11 @@ command! -nargs=0 -bang Push call s:PushCommand("<bang>")
 
 function! s:ShowHistory(CmdLine)
   let result = init#HistFind(a:CmdLine)
-  call init#CreateOneShotQuickfix('History', result, '<SID>SelectCommand')
+  call qutil#CreateOneShotQuickfix(result, 'History', expand('<SID>') .. 'SelectCommand')
 endfunction
 
-function! s:SelectCommand()
-  let command = getline('.')
-  quit
-  exe command
+function! s:SelectCommand(cmd)
+  exe a:cmd
 endfunction
 
 command! -nargs=* History call s:ShowHistory(<q-args>)
@@ -740,7 +852,7 @@ function! s:ShowSessions(pat)
     echo "Nothing to show."
     return
   endif
-  call init#CreateOneShotQuickfix('Sessions', session_files, '<SID>SelectSession')
+  call qutil#CreateOneShotQuickfix(session_files, 'Sessions', '<SID>SelectSession')
 endfunction
 
 function! s:SelectSession(file)
@@ -760,9 +872,6 @@ nnoremap <silent> <leader>ta :tabnew<CR><C-O>
 nnoremap <silent> <leader>tA :-tabnew<CR><C-O>
 nnoremap <silent> <leader>tc :tabclose<CR>
 nnoremap <silent> <leader>on :only<CR>
-
-nnoremap <silent> <leader>unix :set ff=unix<CR>
-nnoremap <silent> <leader>dos :set ff=dos<CR>
 
 " copy-pasting
 nnoremap <leader>y "+y
@@ -810,34 +919,13 @@ function! WindowCompl(ArgLead, CmdLine, CursorPos)
   return uniq(sort(windows))
 endfunction
 
-function! s:SimplifyTabs(max_count)
-  if a:max_count <= 0
-    return
-  endif
-
-  let tab_last_used = #{}
-  let all_last_used = []
-  for entry in gettabinfo()
-    let nrs = map(entry['windows'], 'winbufnr(v:val)')
-    let lastused = max(map(nrs, 'getbufinfo(v:val)[0].lastused'))
-    let tabnr = entry['tabnr']
-    let tab_last_used[tabnr] = lastused
-    call add(all_last_used, lastused)
-  endfor
-  if len(all_last_used) > a:max_count
-    call sort(all_last_used)
-    let cutoff_time = all_last_used[-a:max_count]
-  else
-    let cutoff_time = 0
-  endif
-  for nr in reverse(range(1, tabpagenr('$')))
-    if tab_last_used[nr] < cutoff_time
-      exe "tabclose " .. nr
-    endif
-  endfor
+function! s:SimplifyTabs()
+  while tabpagenr() != tabpagenr('$')
+    +tabclose
+  endwhile
 endfunction
 
-command! -nargs=? Simp call s:SimplifyTabs(empty(<q-args>) ? 1 : <q-args>)
+command! Simp call s:SimplifyTabs()
 
 " CursorHold time
 set updatetime=500
@@ -886,7 +974,7 @@ nnoremap <silent> ]C :call <SID>NextItem("last")<CR>
 
 function! s:ToggleQf()
   if git#DiffWinid() < 0
-    let winids = qutil#GetQuickfix()
+    let winids = qutil#GetQuickfixWins()
     if !empty(winids)
       call nvim_win_close(winids[0], v:false)
     else
@@ -997,33 +1085,6 @@ endfunction
 
 command! -nargs=0 Cmake call s:OpenCMakeLists()
 
-function! s:OpenClangd()
-  let repo = FugitiveWorkTree()
-  if len(repo) <= 0
-    return
-  endif
-  let file = printf("%s/.clangd", repo)
-  if !filereadable(file)
-    echo "Does not exist!"
-    return
-  endif
-  sp
-  exe "e " .. file
-
-  let lnum = search("CompilationDatabase:")
-  if lnum < 0
-    echo "Missing CompilationDatabase!"
-    return
-  endif
-
-  let expected = printf("  CompilationDatabase: %s/%s", repo, g:BUILD_TYPE)
-  if getline('.') != expected
-    echo "Failed to match!"
-  else
-    echo "Was OK."
-  endif
-endfunction
-
 function! s:CreateClangd()
   let repo = FugitiveWorkTree()
   if empty(repo)
@@ -1037,9 +1098,54 @@ function! s:CreateClangd()
   %delete
   call append(0, ['CompileFlags:', '  CompilationDatabase: ' .. db])
   write
+  quit
 endfunction
 
 command! -nargs=0 Clangd call s:CreateClangd()
+
+function! s:CheckClangd(repo)
+  if len(a:repo) <= 0
+    return
+  endif
+  let file = printf("%s/.clangd", a:repo)
+  if !filereadable(file)
+    return
+  endif
+  let lines = readfile(file)
+  let expected = printf("  CompilationDatabase: %s/%s", a:repo, g:BUILD_TYPE)
+  if index(lines, expected) < 0
+    call init#Warn("Detected old .clangd!") 
+  endif
+endfunction
+
+function! s:CheckCMakeCache(repo)
+  if empty(a:repo)
+    return
+  endif
+  let file = printf("%s/%s/CMakeCache.txt", a:repo, g:BUILD_TYPE)
+  if !filereadable(file)
+    return
+  endif
+  let lines = readfile(file)
+  call filter(lines, 'stridx(v:val, g:SDK_DIR) >= 0')
+  if empty(lines)
+    call init#Warn('Detected old CMake build directory!')
+  endif
+endfunction
+
+function! s:CheckProjectFiles()
+  if !exists('s:checked_repos')
+    let s:checked_repos = #{}
+  endif
+  let repo = FugitiveWorkTree()
+  if !has_key(s:checked_repos, repo)
+    call s:CheckClangd(repo)
+    call s:CheckCMakeCache(repo)
+    let s:checked_repos[repo] = 1
+  endif
+endfunction
+
+autocmd BufReadPost * call s:CheckProjectFiles()
 
 function! s:OpenCompileCommands()
   let repo = FugitiveWorkTree()
@@ -1078,50 +1184,8 @@ xnoremap <silent> ab :<C-u>normal! [{V]}]<CR>
 onoremap <silent> ib :<C-u>normal! [{V]}]<CR>
 xnoremap <silent> ib :<C-u>normal! [{V]}]<CR>
 
-
-function! s:SearchOrStay(pat, flags)
-  if getline('.') !~ a:pat
-    call search(a:pat, a:flags)
-  endif
-endfunction
-
-function! s:OursOrTheirs()
-  if getline('.') =~ '=\{7\}'
-    echo "Choose context to resolve!"
-    return
-  endif
-  call s:SearchOrStay('[<=>]\{7}', 'bW')
-
-  if getline('.') =~ '<\{7}'
-    delete
-    call s:SearchOrStay('=\{7}', 'W')
-    let firstline = line('.')
-    call s:SearchOrStay('>\{7}', 'W')
-    let lastline = line('.')
-    exe printf("%d,%ddelete", firstline, lastline)
-  elseif getline('.') =~ '=\{7}'
-    let lastline = line('.')
-    call s:SearchOrStay('<\{7}', 'bW')
-    let firstline = line('.')
-    exe printf("%d,%ddelete", firstline, lastline)
-    call s:SearchOrStay('>\{7}', 'W')
-    delete
-  elseif getline('.') =~ '>\{7}'
-    delete
-    call s:SearchOrStay('=\{7}', 'bW')
-    let lastline = line('.')
-    call s:SearchOrStay('<\{7}', 'bW')
-    let firstline = line('.')
-    exe printf("%d,%ddelete", firstline, lastline)
-  else
-    echo "Not inside a conflict"
-  endif
-endfunction
-
-command! -nargs=0 Resolve call s:OursOrTheirs()
-
 function s:OpenStackTrace()
-  let dirs = GetRepos()
+  let dirs = qutil#GetRepos()
   let lines = join(getline(1, '$'), "\n")
   let lines = split(lines, '\(^#\)\|\(\n#\)')
   let list = []
@@ -1324,7 +1388,7 @@ function! s:DebugStartPost(args)
   nnoremap <silent> <leader>unt :call PromptDebugPlaceBreakpoint(#{pending: 1, until: 1})<CR>
   nnoremap <silent> <leader>pc :call PromptDebugGoToPC()<CR>
 
-  call PromptDebugEnableTimings()
+  " call PromptDebugEnableTimings()
   call PromptDebugSendCommand("set debug-file-directory /dev/null")
   call PromptDebugSendCommand("set print asm-demangle on")
   call PromptDebugSendCommand("set print pretty on")
@@ -1491,10 +1555,10 @@ function! SourceCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return s:GetSource()->TailItems(a:ArgLead)
+  return s:GetSource()->qutil#FileCompletionPass(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,SourceCompl Source call s:GetSource()->FileFilter(<q-args>)->DropInQf('Source')
+command! -nargs=? -complete=customlist,SourceCompl Source call s:GetSource()->qutil#CommandPass(<q-args>)->qutil#DropInQuickfix('Source')
 
 command! -nargs=? -complete=customlist,SourceCompl S exe "Source " .. <q-args>
 
@@ -1515,10 +1579,10 @@ function! HeaderCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return s:GetHeader()->TailItems(a:ArgLead)
+  return s:GetHeader()->qutil#FileCompletionPass(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,HeaderCompl Header call s:GetHeader()->FileFilter(<q-args>)->DropInQf('Header')
+command! -nargs=? -complete=customlist,HeaderCompl Header call s:GetHeader()->qutil#CommandPass(<q-args>)->qutil#DropInQuickfix('Header')
 
 command! -nargs=? -complete=customlist,HeaderCompl H exe "Header " .. <q-args>
 
@@ -1534,10 +1598,10 @@ function! WorkFilesCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return s:GetWorkFiles()->SplitItems(a:ArgLead)
+  return s:GetWorkFiles()->qutil#ComponentCompletionPass(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->FileFilter(<q-args>)->DropInQf('Workfiles')
+command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->qutil#CommandPass(<q-args>)->qutil#DropInQuickfix('Workfiles')
 
 function! s:GetLocalFiles()
   return qsearch#GetFiles(getcwd())
@@ -1547,10 +1611,10 @@ function! FindCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return s:GetLocalFiles()->SplitItems(a:ArgLead)
+  return s:GetLocalFiles()->qutil#ComponentCompletionPass(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,FindCompl Find call s:GetLocalFiles()->FileFilter(<q-args>)->DropInQf('Find')
+command! -nargs=? -complete=customlist,FindCompl Find call s:GetLocalFiles()->qutil#CommandPass(<q-args>)->qutil#DropInQuickfix('Find')
 
 function! TypeHierarchyHandler(res, encoding)
   let items = []
@@ -1568,7 +1632,7 @@ function! TypeHierarchyHandler(res, encoding)
     call cursor(line, col)
   elseif len(items) > 1
     let items = v:lua.vim.lsp.util.locations_to_items(items, a:encoding)
-    call DropInQf(items, "Hierarchy")
+    call qutil#DropInQuickfix(items, "Hierarchy")
   endif
 endfunction
 
@@ -1579,7 +1643,7 @@ function! ReferenceContainerHandler(res)
         \ col: v:val.range.start.character + 1,
         \ text: v:val.containerName}")
   call sort(items, {a, b -> a.lnum - b.lnum})
-  call DisplayInQf(items, "References")
+  call qutil#SetQuickfix(items, "References")
 endfunction
 
 function! s:LspRequestSync(buf, method, params)
@@ -1623,7 +1687,7 @@ function! s:Instances()
     echo "No instances"
   else
     call sort(items, {a, b -> a.lnum - b.lnum})
-    call DisplayInQf(items, "Instances")
+    call qutil#SetQuickfix(items, "Instances")
   endif
 endfunction
 
@@ -1760,13 +1824,20 @@ function! init#Sshfs(remote, args)
   silent exe "drop scp://" . a:remote . "/" . a:args
 endfunction
 
-function! init#Scp(remote, path)
-  let cmd = printf("rsync -pt %s %s:%s", expand("%:p"), a:remote, a:path)
+function! init#Scp(remote, bang, path)
+  if empty(a:bang)
+    let cmd = printf("rsync -pt %s %s:%s", expand("%:p"), a:remote, a:path)
+  else
+    let cmd = printf("rsync -pt %s:%s %s/Downloads", a:remote, a:path, $HOME)
+  endif
+
   let ret = systemlist(cmd)
   if v:shell_error
     call init#ShowErrors(ret)
-  else
+  elseif empty(a:bang)
     echo "Copied to " .. a:path .. "."
+  else
+    echo "Downloaded " .. a:path .. "."
   endif
 endfunction
 
