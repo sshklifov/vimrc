@@ -260,6 +260,12 @@ function CheckFormat(bufnr)
   local opts = { timeout_ms = 1000 }
   local ns = vim.api.nvim_create_namespace("format-check")
 
+  local fname = vim.api.nvim_buf_get_name(bufnr)
+  local dir = lspconfig.util.root_pattern(".clang-format")(fname)
+  if not dir then
+    return
+  end
+
   for _, client in ipairs(clients) do
     if client.supports_method(method) then
       local params = vim.lsp.util.make_formatting_params({})
@@ -328,7 +334,7 @@ local OnCclsAttach = function(_, bufnr)
   buf_set_keymap('n', 'gr', '<cmd>lua vim.lsp.buf.references()<CR>', opts)
   buf_set_keymap('n', '[d', '<cmd>lua vim.diagnostic.goto_prev({severity = vim.diagnostic.severity.ERROR})<CR>', opts)
   buf_set_keymap('n', ']d', '<cmd>lua vim.diagnostic.goto_next({severity = vim.diagnostic.severity.ERROR})<CR>', opts)
-  buf_set_keymap('n', '<leader>dig', '<cmd>lua vim.diagnostic.setqflist()<CR>', opts)
+  -- buf_set_keymap('n', '<leader>dig', '<cmd>lua vim.diagnostic.setqflist()<CR>', opts)
 
   -- Commands
   opts = { nargs=0 }
