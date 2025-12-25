@@ -1,6 +1,5 @@
 -- vim: set sw=2 ts=2 sts=2 foldmethod=marker:
 
-local lspconfig = require('lspconfig')
 local api = vim.api
 local uv = vim.uv
 local util = require('vim.lsp.util')
@@ -261,8 +260,13 @@ function CheckFormat(bufnr)
   local ns = vim.api.nvim_create_namespace("format-check")
 
   local fname = vim.api.nvim_buf_get_name(bufnr)
-  local dir = lspconfig.util.root_pattern(".clang-format")(fname)
-  if not dir then
+  local path = vim.fs.find(".clang-format", {
+    path = fname,
+    upward = true,
+    stop = vim.loop.os_homedir(),
+  })[1]
+
+  if not path then
     return
   end
 
@@ -315,7 +319,7 @@ end
 
 -- Keymaps and registration
 
-local OnCclsAttach = function(_, bufnr)
+local OnClangdAttach = function(_, bufnr)
   local function buf_set_keymap(...) api.nvim_buf_set_keymap(bufnr, ...) end
   local function user_command(...) api.nvim_buf_create_user_command(bufnr, ...) end
   local function autocmd(event, cb) api.nvim_create_autocmd({event}, {buffer=bufnr, callback = cb}) end
@@ -361,8 +365,8 @@ vim.diagnostic.config({
   virtual_text = true
 })
 
-lspconfig.clangd.setup {
-  on_attach = OnCclsAttach,
+vim.lsp.config("clangd", {
+  on_attach = OnClangdAttach,
   init_options = {
     clangdFileStatus = true
   },
@@ -374,95 +378,9 @@ lspconfig.clangd.setup {
     }
   },
   filetypes = { 'c', 'cpp' }
-}
+})
 
--- Python LSP Config
--- local OnPythonAttach = function(_, bufnr)
---   local function buf_set_keymap(...) api.nvim_buf_set_keymap(bufnr, ...) end
---   local function buf_set_option(name, value) api.nvim_set_option_value(name, value, {buf = bufnr}) end
-
---   -- Enable completion triggered by <c-x><c-o>
---   buf_set_option('omnifunc', 'v:lua.vim.lsp.omnifunc')
-
---   -- Mappings
---   local opts = { noremap=true, silent=true }
-
---   buf_set_keymap('i', '<C-Space>', '<C-X><C-O>', opts)
---   buf_set_keymap('n', 'gd', '<cmd>lua vim.lsp.buf.definition()<CR>', opts)
---   buf_set_keymap('n', 'K', '<cmd>lua vim.lsp.buf.hover()<CR>', opts)
---   buf_set_keymap('i', '<C-k>', '<cmd>lua vim.lsp.buf.signature_help()<CR>', opts)
---   buf_set_keymap('n', '<leader>rn', '<cmd>lua vim.lsp.buf.rename()<CR>', opts)
-
---   buf_set_keymap('n', '<leader>sym', '<cmd>lua vim.lsp.buf.document_symbol()<CR>', opts)
---   buf_set_keymap('n', 'gr', '<cmd>lua vim.lsp.buf.references()<CR>', opts)
---   buf_set_keymap('n', '[d', '<cmd>lua vim.diagnostic.goto_prev({severity = vim.diagnostic.severity.ERROR;})<CR>', opts)
---   buf_set_keymap('n', ']d', '<cmd>lua vim.diagnostic.goto_next({severity = vim.diagnostic.severity.ERROR;})<CR>', opts)
---   buf_set_keymap('n', '<leader>dig', '<cmd>lua vim.diagnostic.setqflist()<CR>', opts)
--- end
-
--- lspconfig.basedpyright.setup{
---   cmd = {"/home/stef/.local/bin/basedpyright-langserver", "--stdio"},
---   on_attach = OnPythonAttach,
--- }
-
--- Lua LSP Config
-
-local OnLuaInit = function(client)
-  local path = client.workspace_folders[1].name
-  if uv.fs_stat(path..'/.luarc.json') or uv.fs_stat(path..'/.luarc.jsonc') then
-    return
-  end
-
-  client.config.settings.Lua = vim.tbl_deep_extend('force', client.config.settings.Lua, {
-    runtime = {
-      -- Tell the language server which version of Lua you're using
-      -- (most likely LuaJIT in the case of Neovim)
-      version = 'LuaJIT'
-    },
-    -- Make the server aware of Neovim runtime files
-    workspace = {
-      checkThirdParty = false,
-      library = {
-        vim.env.VIMRUNTIME
-        -- Depending on the usage, you might want to add additional paths here.
-        -- "${3rd}/luv/library"
-        -- "${3rd}/busted/library",
-      }
-      -- or pull in all of 'runtimepath'. NOTE: this is a lot slower
-      -- library = vim.api.nvim_get_runtime_file("", true)
-    }})
-end
-
-local OnLuaAttach = function(_, bufnr)
-  local function buf_set_keymap(...) api.nvim_buf_set_keymap(bufnr, ...) end
-  local function buf_set_option(name, value) api.nvim_set_option_value(name, value, {buf = bufnr}) end
-
-  -- Enable completion triggered by <c-x><c-o>
-  buf_set_option('omnifunc', 'v:lua.vim.lsp.omnifunc')
-
-  -- Mappings
-  local opts = { noremap=true, silent=true }
-
-  buf_set_keymap('i', '<C-Space>', '<C-X><C-O>', opts)
-  buf_set_keymap('n', 'gd', '<cmd>lua vim.lsp.buf.definition()<CR>', opts)
-  buf_set_keymap('n', 'K', '<cmd>lua vim.lsp.buf.hover()<CR>', opts)
-  buf_set_keymap('i', '<C-k>', '<cmd>lua vim.lsp.buf.signature_help()<CR>', opts)
-  buf_set_keymap('n', '<leader>rn', '<cmd>lua vim.lsp.buf.rename()<CR>', opts)
-
-  buf_set_keymap('n', '<leader>sym', '<cmd>lua vim.lsp.buf.document_symbol()<CR>', opts)
-  buf_set_keymap('n', 'gr', '<cmd>lua vim.lsp.buf.references()<CR>', opts)
-  buf_set_keymap('n', '[d', '<cmd>lua vim.diagnostic.goto_prev({severity = vim.diagnostic.severity.ERROR;})<CR>', opts)
-  buf_set_keymap('n', ']d', '<cmd>lua vim.diagnostic.goto_next({severity = vim.diagnostic.severity.ERROR;})<CR>', opts)
-  buf_set_keymap('n', '<leader>dig', '<cmd>lua vim.diagnostic.setqflist()<CR>', opts)
-end
-
--- lspconfig.lua_ls.setup {
---   on_init = OnLuaInit,
---   on_attach = OnLuaAttach,
---   settings = {
---     Lua = {}
---   },
--- }
+vim.lsp.enable('clangd')
 
 -- System clipboard
 

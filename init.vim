@@ -69,10 +69,11 @@ if s:is_work_pc
     let g:HOST = s:default_host
     let g:DEVICE = "p15"
   endif
-  if !exists('g:BUILD_TYPE')
-    let g:BUILD_TYPE = "Release"
-  endif
   call plug#load('work')
+endif
+
+if !exists('g:BUILD_TYPE')
+  let g:BUILD_TYPE = "Release"
 endif
 
 " sshklifov/rsi
@@ -582,11 +583,9 @@ set nofoldenable
 set shell=/bin/bash
 set splitright
 
-if !s:is_work_pc
-  " This is causing problems because of slow SSH connections
-  " I think so? But it is definitely causing problems...
-  set nottimeout
-endif
+" This is causing problems because of slow SSH connections
+" I think so? But it is definitely causing problems...
+set ttimeout
 
 " Display better the currently selected entry in quickfix
 autocmd FileType qf setlocal cursorline
@@ -719,7 +718,7 @@ function! HostStatusLine()
       return "(" .. g:HOST .. ")"
     endif
    else
-    if !work#GetHostStatus()
+    if exists("*work#GetHostStatus") && !work#GetHostStatus()
       return "(- " .. g:HOST .. ")"
     else
       return ""
@@ -777,6 +776,36 @@ command! -nargs=0 ChooseHighlight call s:ShowHighlights()
 
 """"""""""""""""""""""""""""IDE maps"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+command! -nargs=0 Debug let g:BUILD_TYPE = "Debug"
+command! -nargs=0 Release let g:BUILD_TYPE = "Release"
+
+function! init#GetMakeCommand(...)
+  let force = get(a:000, 0, v:false)
+  let repo = FugitiveWorkTree()
+  if empty(repo)
+    echo "Not inside repo"
+    return
+  endif
+
+  let cmds = []
+  call add(cmds, printf("cd %s", FugitiveWorkTree()))
+
+  let build_dir = printf("%s/%s", FugitiveWorkTree(), g:BUILD_TYPE)
+  if force || !isdirectory(build_dir)
+    let cmake = printf("cmake -B %s -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=%s", g:BUILD_TYPE, g:BUILD_TYPE)
+    call add(cmds, cmake)
+  endif
+
+  let build = printf("cmake --build %s -j 10", g:BUILD_TYPE)
+  call add(cmds, build)
+
+  let command = ["/bin/bash", "-c", join(cmds, ';')]
+  return command
+endfunction
+
+command! -nargs=0 -bang Make call qutil#Make(init#GetMakeCommand(), "<bang>")
+command! -nargs=0 Clean call system("rm -rf " . FugitiveFind(g:BUILD_TYPE))
+
 function s:PushCommand(bang)
   if !git#PushCommand(a:bang)
     return
@@ -1145,7 +1174,8 @@ function! s:CheckProjectFiles()
   endif
 endfunction
 
-autocmd BufReadPost * call s:CheckProjectFiles()
+" TODO this needs to be improved/fixed
+" autocmd BufReadPost * call s:CheckProjectFiles()
 
 function! s:OpenCompileCommands()
   let repo = FugitiveWorkTree()
@@ -1766,7 +1796,6 @@ function! s:SmartWorkspaceSymbol()
 endfunction
 
 nnoremap <silent> gS <cmd>call <SID>SmartWorkspaceSymbol()<CR>
-
 "}}}
 
 """"""""""""""""""""""""""""Remote"""""""""""""""""""""""""""" {{{
