@@ -805,6 +805,7 @@ endfunction
 
 command! -nargs=0 -bang Make call qutil#Make(init#GetMakeCommand(), "<bang>")
 command! -nargs=0 Clean call system("rm -rf " . FugitiveFind(g:BUILD_TYPE))
+command! -nargs=0 -bang Remake exe "Clean" | exe "Make<bang>"
 
 function s:PushCommand(bang)
   if !git#PushCommand(a:bang)
@@ -1521,6 +1522,126 @@ function! init#GetRangeExpr()
   let lines[-1] = lines[-1][:col2 - 1]
   let lines[0] = lines[0][col1 - 1:]
   return join(lines, " ")
+endfunction
+"}}}
+
+""""""""""""""""""""""""""""Disas"""""""""""""""""""""""""" {{{
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+let g:objdump_exe = "objdump"
+
+function! init#Disassemble(dyn, arg)
+  let exe = a:arg
+  let funcs = systemlist(printf("nm -g%s --defined-only %s", a:dyn, exe))
+  call map(funcs, 'split(v:val)')
+  call filter(funcs, 'toupper(v:val[1]) == "W" || toupper(v:val[1]) == "T"')
+  call map(funcs, 'v:val[2]')
+  if empty(funcs)
+    echo "No symbols!"
+    return
+  endif
+  let unmangled = systemlist("c++filt", funcs)
+  call map(unmangled, 'v:val[:180]')
+  let nr = qutil#CreateCustomQuickfix(unmangled, 'Symbols', 'init#SelectSymbol', exe)
+  if nr >= 0
+    " Much faster than binding it in above 'function'.
+    let b:mangled_names = funcs
+    call setbufvar(nr, '&modifiable', v:false)
+  endif
+endfunction
+
+function! init#SelectSymbol(exe)
+  let idx = line('.') - 1
+  let mangled = b:mangled_names[idx]
+
+  let disas = systemlist(printf('%s -Sl --disassemble=%s %s', g:objdump_exe, mangled, a:exe))
+
+  let disas_nr = bufadd('Disassembly')
+  call setbufvar(disas_nr, '&buftype', 'nofile')
+  call setbufvar(disas_nr, '&bufhidden', 'wipe')
+  call bufload(disas_nr)
+
+  let file_line_map = #{}
+  let curr_lines = []
+  for i in range(len(disas))
+    let m = matchlist(disas[i], '^\(/.*\):\([0-9]\+\)')
+    if !empty(m)
+      let curr_file = m[1]
+      " Needed in order to get syntax (init#CopySyntax)
+      exe "e " .. curr_file
+      let curr_lines = getline(1, '$')
+      let curr_pos = 0
+    else
+      let m = matchlist(disas[i], '^\s*\x\+:')
+      if !empty(m)
+        call init#AppendChunksAtEnd(disas_nr, [[disas[i], '@comment']])
+      elseif !empty(curr_lines)
+        let idx = index(curr_lines[curr_pos:], disas[i])
+        if idx >= 0
+          let curr_pos += idx + 1
+          call init#CopySyntax(curr_pos, disas_nr)
+          if !has_key(file_line_map, curr_file)
+            let file_line_map[curr_file] = #{}
+          endif
+          let line_map = file_line_map[curr_file]
+          if !has_key(line_map, curr_pos - 1)
+            let line_map[curr_pos - 1] = []
+          endif
+          call add(line_map[curr_pos - 1], nvim_buf_line_count(disas_nr) - 1)
+        else
+          let curr_lines = []
+        endif
+      endif
+    endif
+  endfor
+
+  call setbufvar(disas_nr, '&expandtab', v:false)
+  call setbufvar(disas_nr, '&smarttab', v:false)
+  call setbufvar(disas_nr, '&softtabstop', 0)
+  call setbufvar(disas_nr, '&tabstop', 8)
+  call setbufvar(disas_nr, 'file_line_map', file_line_map)
+
+  for filename in keys(file_line_map)
+    " Needed by LSP to process file
+    exe "e " .. filename
+    let nr = bufnr()
+    exe printf("lua GetSemanticTokens(%d, 'init#TransferExtmarks', {%d, %d})", nr, disas_nr, nr)
+  endfor
+
+  quit
+  exe "b " .. disas_nr
+  call setbufvar(disas_nr, '&list', v:false)
+endfunction
+
+function init#TransferExtmarks(dst_nr, src_nr, in_lnum, in_col, in_opt)
+  let ns = nvim_create_namespace('semantic_tokens')
+  let file_line_map = getbufvar(a:dst_nr, 'file_line_map')
+  let src_pathname = fnamemodify(bufname(a:src_nr), ':p')
+  let line_map = file_line_map[src_pathname]
+  if has_key(line_map, a:in_lnum)
+    let dst_lnums = line_map[a:in_lnum]
+    for dst_lnum in dst_lnums
+      call nvim_buf_set_extmark(a:dst_nr, ns, dst_lnum, a:in_col, a:in_opt)
+    endfor
+  endif
+endfunction
+
+function! s:GetDisassembleTargets()
+  let dir = FugitiveWorkTree()
+  if !isdirectory(dir)
+    return []
+  endif
+  let dir = printf("%s/%s", dir, g:BUILD_TYPE)
+  return systemlist(["find", dir, "-type", "f", "-executable"])
+endfunction
+
+command! -nargs=? -bang -complete=customlist,DisassembleCompl Disassemble
+      \ call s:GetDisassembleTargets()->qutil#CommandPass(<q-args>)->qutil#CreateOneShotQuickfix('Disassemble', 'init#Disassemble', <bang>0 ? 'D' : '')
+
+function! DisassembleCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  return s:GetDisassembleTargets()->qutil#FileCompletionPass(a:ArgLead)
 endfunction
 "}}}
 
