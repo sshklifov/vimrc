@@ -300,6 +300,18 @@ endfunction
 
 command! -nargs=0 Jobs call s:ShowJobs()
 
+function! init#OnJobProcess(cmds, input, cb, ...)
+  call assert_true(type(a:cb) == v:t_string)
+  call assert_true(type(a:input) == v:t_list)
+  let Cb = function(a:cb, a:000)
+  let WrapCb = {_0, data, _1 -> Cb(data) }
+  let id = init#Jobstart(a:cmds, #{stdout_buffered: v:true, on_stdout: WrapCb})
+
+  call chansend(id, a:input)
+  call chanclose(id, 'stdin')
+  return id
+endfunction
+
 function! init#OnJobOutput(cmds, cb, ...)
   call assert_true(type(a:cb) == v:t_string)
   let Cb = function(a:cb, a:000)
@@ -1535,18 +1547,23 @@ endfunction
 let g:objdump_exe = "objdump"
 
 function! init#Disassemble(dyn, arg)
-  let exe = a:arg
-  let funcs = systemlist(printf("nm -g%s --defined-only %s", a:dyn, exe))
-  call map(funcs, 'split(v:val)')
+  call init#OnJobOutput(printf("nm -g%s --defined-only %s", a:dyn, a:arg), 's:OnSymbols', a:arg)
+endfunction
+
+function! s:OnSymbols(exe, funcs)
+  let funcs = filter(a:funcs, '!empty(v:val)')
+  let funcs = map(funcs, 'split(v:val)')
   call filter(funcs, 'toupper(v:val[1]) == "W" || toupper(v:val[1]) == "T"')
   call map(funcs, 'v:val[2]')
   if empty(funcs)
     echo "No symbols!"
     return
   endif
+
+  " Note: Fast enough to call without using jobs
   let unmangled = systemlist("c++filt", funcs)
   call map(unmangled, 'v:val[:180]')
-  let nr = qutil#CreateCustomQuickfix(unmangled, 'Symbols', 'init#SelectSymbol', exe)
+  let nr = qutil#CreateCustomQuickfix(unmangled, 'Symbols', 'init#SelectSymbol', a:exe)
   if nr >= 0
     " Much faster than binding it in above 'function'.
     let b:mangled_names = funcs
@@ -1558,15 +1575,25 @@ function! init#SelectSymbol(exe)
   let idx = line('.') - 1
   let mangled = b:mangled_names[idx]
 
-  let disas = systemlist(printf('%s -Sl --disassemble=%s %s', g:objdump_exe, mangled, a:exe))
+  let cmd = printf('%s -M intel -Sl --disassemble=%s %s', g:objdump_exe, mangled, a:exe)
+  call init#OnJobOutput(cmd, 's:OnDisassemble')
+endfunction
 
+function! s:OnDisassemble(disas)
+  call init#OnJobProcess("c++filt", a:disas, 's:OnReadableDisassemble')
+endfunction
+
+function! s:OnReadableDisassemble(disas)
+  " Create buffer
   let disas_nr = bufadd('Disassembly')
   call setbufvar(disas_nr, '&buftype', 'nofile')
   call setbufvar(disas_nr, '&bufhidden', 'wipe')
   call bufload(disas_nr)
 
+  " Copy basic syntax highlight (from vim filetype)
   let file_line_map = #{}
   let curr_lines = []
+  let disas = a:disas
   for i in range(len(disas))
     let m = matchlist(disas[i], '^\(/.*\):\([0-9]\+\)')
     if !empty(m)
@@ -1605,6 +1632,7 @@ function! init#SelectSymbol(exe)
   call setbufvar(disas_nr, '&tabstop', 8)
   call setbufvar(disas_nr, 'file_line_map', file_line_map)
 
+  " Copy main syntax highlight (from lsp)
   for filename in keys(file_line_map)
     " Needed by LSP to process file
     exe "e " .. filename
