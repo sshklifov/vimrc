@@ -1439,6 +1439,7 @@ function! s:DebugStartPost(args)
   " call PromptDebugEnableTimings()
   call PromptDebugSendCommand("set debug-file-directory /dev/null")
   call PromptDebugSendCommand("set print asm-demangle on")
+  call PromptDebugSendCommand("set disassembly-flavor intel")
   call PromptDebugSendCommand("set print pretty on")
   call PromptDebugSendCommand("set print frame-arguments none")
   call PromptDebugSendCommand("set print raw-frame-arguments off")
@@ -1546,8 +1547,8 @@ endfunction
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 let g:objdump_exe = "objdump"
 
-function! init#Disassemble(dyn, arg)
-  call init#OnJobOutput(printf("nm -g%s --defined-only %s", a:dyn, a:arg), 's:OnSymbols', a:arg)
+function! init#Disassemble(arg)
+  call init#OnJobOutput(printf("nm --defined-only %s", a:arg), 's:OnSymbols', a:arg)
 endfunction
 
 function! s:OnSymbols(exe, funcs)
@@ -1667,8 +1668,8 @@ function! s:GetDisassembleTargets()
   return systemlist(["find", dir, "-type", "f", "-executable"])
 endfunction
 
-command! -nargs=? -bang -complete=customlist,DisassembleCompl Disassemble
-      \ call s:GetDisassembleTargets()->qutil#CommandPass(<q-args>)->qutil#CreateOneShotQuickfix('Disassemble', 'init#Disassemble', <bang>0 ? 'D' : '')
+command! -nargs=? -complete=customlist,DisassembleCompl Disassemble
+      \ call s:GetDisassembleTargets()->qutil#CommandPass(<q-args>)->qutil#CreateOneShotQuickfix('Disassemble', 'init#Disassemble')
 
 function! DisassembleCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
