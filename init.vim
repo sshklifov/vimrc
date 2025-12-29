@@ -1303,10 +1303,15 @@ function! ExeCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
+  let dir = printf("%s/%s", FugitiveWorkTree(), g:BUILD_TYPE)
+  if !isdirectory(dir)
+    return []
+  endif
   let pat = "*" . a:ArgLead . "*"
-  let cmd = ["find", ".", "(", "-path", "**/.git", "-prune", "-false", "-o", "-name", pat, ")"]
-  let cmd += ["-type", "f", "-executable", "-printf", "%P\n"]
-  return systemlist(cmd)
+  let cmd = ["find", dir, "(", "-path", "**/CMakeFiles", "-prune", "-false", "-o", "-name", pat, ")"]
+  let cmd += ["-type", "f", "-executable"]
+  let exes = systemlist(cmd)
+  return map(exes, 'fnamemodify(v:val, ":.")')
 endfunction
 
 function! s:AttachDebug(proc)
