@@ -1571,12 +1571,30 @@ function! s:OnSymbols(exe, funcs)
     " Much faster than binding it in above 'function'.
     let b:mangled_names = funcs
     call setbufvar(nr, '&modifiable', v:false)
+    command! -buffer -nargs=1 -bang Cf call s:FilterSymbols("<bang>", <q-args>)
+    command! -buffer -nargs=1 -bang Cff call s:FilterSymbols("<bang>", <q-args>)
   endif
+endfunction
+
+function! s:FilterSymbols(bang, arg)
+  setlocal modifiable
+  if empty(a:bang)
+    let cmp = ' >= 0'
+  else
+    let cmp = ' < 0'
+  endif
+  let lines = getline(1, '$')
+  call filter(b:mangled_names, 'stridx(lines[v:key], a:arg)' .. cmp)
+  call filter(lines, 'stridx(v:val, a:arg)' .. cmp)
+  call assert_true(len(lines) == len(b:mangled_names))
+  call nvim_buf_set_lines(bufnr(), 0, -1, v:false, lines)
+  setlocal nomodifiable
 endfunction
 
 function! init#SelectSymbol(exe)
   let idx = line('.') - 1
   let mangled = b:mangled_names[idx]
+  echom "Showing symbol " .. mangled
 
   let cmd = printf('%s -M intel -Sl --disassemble=%s %s', g:objdump_exe, mangled, a:exe)
   call init#OnJobOutput(cmd, 's:OnDisassemble')
