@@ -2,7 +2,6 @@
 
 local api = vim.api
 local uv = vim.uv
-local util = require('vim.lsp.util')
 
 -- Retrieve lsp highlight
 -- XXX: Copied from semantic_tokens.lua in runtime, so it's not the most stable code
@@ -42,7 +41,7 @@ local function tokens_to_ranges(data, bufnr, client)
       if col > 0 then
         local buf_line = lines[line + 1] or ''
         local ok, result
-        ok, result = pcall(util._str_byteindex_enc, buf_line, col, client.offset_encoding)
+        ok, result = pcall(vim.lsp.util._str_byteindex_enc, buf_line, col, client.offset_encoding)
         if ok then
           return result
         end
@@ -377,7 +376,18 @@ vim.lsp.config("clangd", {
       }
     }
   },
-  filetypes = { 'c', 'cpp' }
+  filetypes = { 'c', 'cpp' },
+  root_dir = function(bufnr, on_dir)
+    local fname = vim.api.nvim_buf_get_name(bufnr)
+     -- Reject non-existent paths
+    if vim.fn.filereadable(fname) ~= 1 then
+      return
+    end
+    local dir = vim.fs.dirname(vim.fs.find({'.clangd', '.clang-format', '.git'}, { path = fname, upward = true })[1])
+    if dir then
+      on_dir(dir)
+    end
+  end
 })
 
 vim.lsp.enable('clangd')
