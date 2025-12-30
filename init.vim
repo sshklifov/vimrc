@@ -1788,18 +1788,12 @@ endfunction
 
 command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->qutil#CommandPass(<q-args>)->qutil#DropInQuickfix('Workfiles')
 
-function! s:GetLocalFiles()
-  return qsearch#GetFiles(getcwd())
+function! init#OnFindData(data)
+  call qutil#DropInQuickfix(a:data, 'Find')
 endfunction
 
-function! FindCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  return s:GetLocalFiles()->qutil#ComponentCompletionPass(a:ArgLead)
-endfunction
-
-command! -nargs=? -complete=customlist,FindCompl Find call s:GetLocalFiles()->qutil#CommandPass(<q-args>)->qutil#DropInQuickfix('Find')
+" command! -nargs=? Find call )->qutil#CommandPass(<q-args>)->qutil#DropInQuickfix('Find')
+command! -nargs=? Find call qsearch#OnFiles(getcwd(), ["-name", "*" . <q-args> . "*"], 'init#OnFindData')
 
 function! TypeHierarchyHandler(res, encoding)
   let items = []
