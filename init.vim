@@ -1439,7 +1439,6 @@ function! s:DebugStartPost(args)
   " call PromptDebugEnableTimings()
   call PromptDebugSendCommand("set debug-file-directory /dev/null")
   call PromptDebugSendCommand("set print asm-demangle on")
-  call PromptDebugSendCommand("set disassembly-flavor intel")
   call PromptDebugSendCommand("set print pretty on")
   call PromptDebugSendCommand("set print frame-arguments none")
   call PromptDebugSendCommand("set print raw-frame-arguments off")
@@ -1487,6 +1486,9 @@ endfunction
 
 function! s:DebugRunPost()
   call PromptDebugSendCommand("set scheduler-locking step")
+  if !s:is_work_pc
+    call PromptDebugSendCommand("set disassembly-flavor intel")
+  endif
 endfunction
 
 function! s:DebugStopPost()
