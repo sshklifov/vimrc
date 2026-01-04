@@ -116,10 +116,12 @@ function! s:Rename(arg)
 
   let lua_str = 'lua vim.lsp.util.rename("' . oldname . '", "' . newname . '")'
   exe lua_str
+  LspRestart
 endfunction
 
 command! -nargs=1 -complete=file Rename call <SID>Rename(<q-args>)
 
+" TODO add a backup!
 function! s:Delete(bang)
   try
     let file = expand("%:p")
@@ -788,8 +790,8 @@ command! -nargs=0 ChooseHighlight call s:ShowHighlights()
 
 """"""""""""""""""""""""""""IDE maps"""""""""""""""""""""""""""" {{{
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-command! -nargs=0 Debug let g:BUILD_TYPE = "Debug"
-command! -nargs=0 Release let g:BUILD_TYPE = "Release"
+command! -nargs=0 -bar Debug let g:BUILD_TYPE = "Debug" | Clangd
+command! -nargs=0 -bar Release let g:BUILD_TYPE = "Release" | Clangd
 
 function! init#GetMakeCommand(...)
   let force = get(a:000, 0, v:false)
@@ -818,6 +820,8 @@ endfunction
 command! -nargs=0 -bang Make call qutil#Make(init#GetMakeCommand(), "<bang>")
 command! -nargs=0 Clean call system("rm -rf " . FugitiveFind(g:BUILD_TYPE))
 command! -nargs=0 -bang Remake exe "Clean" | exe "Make<bang>"
+
+nnoremap <silent> <leader>re :Make<CR>
 
 function s:PushCommand(bang)
   if !git#PushCommand(a:bang)
@@ -1143,7 +1147,7 @@ function! s:CreateClangd()
   quit
 endfunction
 
-command! -nargs=0 Clangd call s:CreateClangd()
+command! -nargs=0 -bar Clangd call s:CreateClangd() | LspRestart
 
 function! s:CheckClangd(repo)
   if len(a:repo) <= 0
@@ -1192,16 +1196,27 @@ endfunction
 
 function! s:OpenCompileCommands()
   let repo = FugitiveWorkTree()
-  let regex = '"file": .*' .. expand("%:t")
-  if len(repo) <= 0
-    return
-  endif
-  let file = printf("%s/%s/compile_commands.json", repo, g:BUILD_TYPE)
-  if !filereadable(file)
+  let curr_file = expand("%:p")
+  let json_file = printf("%s/%s/compile_commands.json", repo, g:BUILD_TYPE)
+  if !filereadable(json_file)
     echo "Does not exist!"
     return
   endif
-  call qsearch#GrepNoExclude(regex, file)
+  let json = json_decode(readfile(json_file))
+  for entry in json
+    if !has_key(entry, 'file') || !has_key(entry, 'command')
+      continue
+    endif
+    let entry_file = fnamemodify(entry['file'], ':p')
+    if entry_file == curr_file
+      let flags = split(entry['command'])
+      return init#CustomBottomBuffer('Flags', flags)
+    endif
+  endfor
+  let relative_file = fnamemodify(json_file, ":.")
+  echom printf("File not found in %s!", relative_file)
+  exe "edit " .. relative_file
+  return bufnr()
 endfunction
 
 command! -nargs=0 CompileCommands call s:OpenCompileCommands()
@@ -1437,6 +1452,7 @@ function! s:DebugStartPost(args)
   nnoremap <silent> <leader>pc :call PromptDebugGoToPC()<CR>
 
   " call PromptDebugEnableTimings()
+  call PromptDebugSendCommand("set disable-randomization on")
   call PromptDebugSendCommand("set debug-file-directory /dev/null")
   call PromptDebugSendCommand("set print asm-demangle on")
   call PromptDebugSendCommand("set print pretty on")
@@ -1701,6 +1717,23 @@ endfunction
 
 """"""""""""""""""""""""""""LSP"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function! s:TruncateLspLog()
+  let logs = [$NVIM_LOG_FILE, luaeval("vim.lsp.get_log_path()")]
+  for log in logs
+    if filereadable(log)
+      let size = getfsize(log)
+      if size > 64 * 1024
+        call writefile([], log)
+      endif
+    endif
+  endfor
+  if exists('$NVIM_LOG_FILE') && filereadable($NVIM_LOG_FILE)
+    call delete($NVIM_LOG_FILE)
+  endif
+endfunction
+
+autocmd VimEnter * call s:TruncateLspLog()
+
 command! -nargs=0 LspStop lua vim.lsp.stop_client(vim.lsp.get_active_clients())
 command! -nargs=0 LspProg lua print(vim.inspect(vim.lsp.status()))
 
