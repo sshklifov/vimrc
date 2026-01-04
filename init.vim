@@ -121,15 +121,17 @@ endfunction
 
 command! -nargs=1 -complete=file Rename call <SID>Rename(<q-args>)
 
-" TODO add a backup!
 function! s:Delete(bang)
+  if !executable("kioclient5")
+    call init#Warn("kioclient5 is not installed!")
+  endif
   try
     let file = expand("%:p")
     exe "bw" . a:bang
-    call delete(file)
   catch
     echoerr "No write since last change. Add ! to override."
   endtry
+  call init#TryCall('init#SystemOrThrow', ["kioclient5", "move", file, 'trash:/'])
 endfunction
 
 command! -nargs=0 -bang Delete call <SID>Delete('<bang>')
