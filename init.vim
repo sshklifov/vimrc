@@ -1245,36 +1245,34 @@ onoremap <silent> ib :<C-u>normal! [{V]}]<CR>
 xnoremap <silent> ib :<C-u>normal! [{V]}]<CR>
 
 function s:OpenStackTrace()
-  let dirs = qutil#GetRepos()
-  let lines = join(getline(1, '$'), "\n")
-  let lines = split(lines, '\(^#\)\|\(\n#\)')
-  let list = []
+  let repo = FugitiveWorkTree()
+  if empty(repo)
+    echo "Not inside repo!"
+    return
+  endif
+  let old_map = #{}
+  let files = s:GetSource(repo) + s:GetHeader(repo)
+  for file in files
+    let old_map[fnamemodify(file, ':t')] = file
+  endfor
+
+  let res = []
+  let lines = split(@+, '\n')
   for line in lines
-    let m = matchlist(line, '^\([0-9]\+\).* at \([^:]\+\):\([0-9]\+\)')
-    if len(m) < 4
-      call add(list, #{text: '#'.line, valid: 0})
+    let m = matchlist(line, 'at \([^:]\+\):\([0-9]\+\)$')
+    if len(m) < 3
+      call add(res, #{text: line, valid: 0})
     else
-      let level = m[1]
-      let file = m[2]
-      let line = m[3]
-      let resolved = v:false
-      for dir in dirs
-        let repo = fnamemodify(dir, ":t")
-        let resolved = substitute(file, "^.*" . repo, dir, "")
-        if filereadable(resolved)
-          call add(list, #{filename: resolved, lnum: line, text: level})
-          let resolved = v:true
-          break
-        endif
-      endfor
-      if !resolved
-        let text = printf("%s:%d", file, line)
-        call add(list, #{text: text, valid: 0})
+      let file = m[1]
+      let lnum = m[2]
+      if has_key(old_map, file)
+        call add(res, #{filename: old_map[file], lnum: lnum, text: line})
+      else
+        call add(res, #{text: line, valid: 0})
       endif
     endif
   endfor
-  call setqflist([], ' ', #{title: 'Stack', items: list})
-  copen
+  call qutil#SetQuickfix(reverse(res), "Stack")
 endfunction
 
 command! -nargs=0 Crashtrace call s:OpenStackTrace()
