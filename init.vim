@@ -1992,12 +1992,28 @@ function! s:EditRecentSource()
   endif
 endfunction
 
-function! s:SmartWorkspaceSymbol()
-  call s:EditRecentSource()
-  lua vim.lsp.buf.workspace_symbol()
+function! OnWorkspaceSymbols(resp)
+  let items = []
+  if has_key(a:resp, "items")
+    let items = a:resp.items
+    let repo = FugitiveWorkTree()
+    if !empty(repo)
+      call filter(items, 'git#IsRepoFile(v:val.filename, repo)')
+    endif
+  endif
+  if !empty(items)
+    call qutil#DropInQuickfix(items, "Symbols")
+  else
+    echo "No symbols!"
+  endif
 endfunction
 
-nnoremap <silent> gS <cmd>call <SID>SmartWorkspaceSymbol()<CR>
+function! s:SmartWorkspaceSymbols()
+  call s:EditRecentSource()
+  lua vim.lsp.buf.workspace_symbol(nil, { on_list = vim.fn.OnWorkspaceSymbols })
+endfunction
+
+nnoremap <silent> gS <cmd>call <SID>SmartWorkspaceSymbols()<CR>
 "}}}
 
 """"""""""""""""""""""""""""Remote"""""""""""""""""""""""""""" {{{
