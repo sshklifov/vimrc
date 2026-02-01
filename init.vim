@@ -334,6 +334,31 @@ function! init#OnJobExit(cmds, cb, ...)
   return init#Jobstart(a:cmds, #{on_exit: {_0, code, _2 -> Cb(code)}})
 endfunction
 
+function! s:RunPdp()
+  let exe = printf('/home/stef/Downloads/pdp/%s/pdp', g:BUILD_TYPE)
+  let opts = #{rpc: v:true, on_exit: {_0, code, _2 -> s:OnPdpExit(code)}}
+  let job = init#Jobstart([exe, '--record'], opts)
+  if job <= 0
+    return init#Warn("Failed to start pdp")
+  endif
+
+  augroup PDP
+    autocmd!
+    exe printf('autocmd BufReadPost,BufFilePost * call rpcnotify(%d, "pdp/buf_changed", bufnr("%%"), expand("%%:p"))', job)
+    exe printf ('autocmd BufWipeout * call rpcnotify(%d, "pdp/buf_removed", expand("<afile>:p"))', job)
+  augroup END
+endfunction
+
+function! s:OnPdpExit(code)
+  call init#Warn("Pdp exited with code: " .. a:code)
+  " Uninstall notify autocmds
+  augroup PDP
+    autocmd!
+  augroup END
+endfunction
+
+command! -nargs=0 TestPdp call s:RunPdp()
+
 function! init#OnJobSuccess(cmds, cb, ...)
   call assert_true(type(a:cb) == v:t_string)
   let Cb = function(a:cb, a:000)
@@ -1272,7 +1297,7 @@ function s:OpenStackTrace()
       endif
     endif
   endfor
-  call qutil#SetQuickfix(reverse(res), "Stack")
+  call qutil#SetQuickfix(res, "Stack")
 endfunction
 
 command! -nargs=0 Crashtrace call s:OpenStackTrace()
