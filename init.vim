@@ -547,7 +547,7 @@ function! s:RecentFiles()
   call qutil#DropInQuickfix(files, "Recent files")
 endfunction
 
-command! -nargs=0 Recent call s:RecentFiles()
+command! -nargs=0 List call s:RecentFiles()
 
 " Open vimrc quick (muy importante)
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
@@ -913,9 +913,12 @@ function! SaveCompl(ArgLead, CmdLine, CursorPos)
   return sessions
 endfunction
 
-function! s:GetSessions()
+function! s:GetSessions(...)
   let dir = stdpath('data') .. '/sessions'
   let session_files = systemlist(['find', dir, '-type', 'f'])
+  if a:0 > 0
+    call filter(session_files, "stridx(v:val, a:1) >= 0")
+  endif
   let Comparator = {lhs, rhs -> getftime(rhs) - getftime(lhs)}
   call sort(session_files, Comparator)
   if v:shell_error
@@ -926,7 +929,7 @@ function! s:GetSessions()
 endfunction
 
 function! s:ShowSessions(pat)
-  let session_files = s:GetSessions()
+  let session_files = s:GetSessions(a:pat)
   if empty(session_files)
     echo "Nothing to show."
     return
@@ -938,9 +941,17 @@ function! s:SelectSession(file)
   exe "so " .. a:file
 endfunction
 
-command! -nargs=0 Load call s:ShowSessions('')
+command! -nargs=? Load call s:ShowSessions(<q-args>)
 
-nnoremap <silent> <leader>so :exe "so " .. <SID>GetSessions()[0]<CR>
+function! s:LoadSessionFile()
+  let file = s:GetSessionFile()
+  if !filereadable(file)
+    let file = s:GetSessions()[0]
+  endif
+  exe "so " .. file
+endfunction
+
+nnoremap <silent> <leader>so <cmd>call <SID>LoadSessionFile()<CR>
 
 set sessionoptions=buffers,curdir,help,tabpages,winsize
 
@@ -1164,7 +1175,7 @@ endfunction
 
 command! -nargs=0 Cmake call s:OpenCMakeLists()
 
-function! s:CreateClangd()
+function! init#CreateClangd()
   let repo = FugitiveWorkTree()
   if empty(repo)
     echo "Not inside repo!"
@@ -1180,7 +1191,7 @@ function! s:CreateClangd()
   quit
 endfunction
 
-command! -nargs=0 -bar Clangd call s:CreateClangd() | LspRestart
+command! -nargs=0 -bar Clangd call init#CreateClangd() | LspRestart
 
 function! s:CheckClangd(repo)
   if len(a:repo) <= 0
