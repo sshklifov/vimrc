@@ -542,12 +542,16 @@ command! -nargs=0 Buffers call s:RecentBuffers()
 
 autocmd BufEnter * call s:OnBufferEnter()
 
-function! s:RecentFiles()
+function! s:RecentFiles(num_files)
+  let n = str2nr(a:num_files)
   let files = init#SystemOrThrow(["ls", "-t", "-A", "-1", getcwd()])
+  if n > 0
+    let files = files[:n-1]
+  endif
   call qutil#DropInQuickfix(files, "Recent files")
 endfunction
 
-command! -nargs=0 List call s:RecentFiles()
+command! -nargs=? List call s:RecentFiles(<q-args>)
 
 " Open vimrc quick (muy importante)
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
