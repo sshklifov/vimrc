@@ -97,7 +97,7 @@ let g:netrw_keepdir = 0
 
 " sshklifov/qsearch
 let g:qsearch_exclude_dirs = [".cache", ".git", "Debug", "Release", "RelWithDebInfo", "build"]
-let g:qsearch_exclude_files = ["compile_commands.json"]
+let g:qsearch_exclude_files = []
 
 " tpope/vim-eunuch
 function! s:Rename(arg)
@@ -170,6 +170,42 @@ func init#Get(what, ...)
   endfor
   return result
 endfunc
+
+function! init#JoinCallbacks(namespace, idx, cb, num_callbacks)
+  let list_variable = a:namespace .. "_list"
+  let callback_variable = a:namespace .. "_callback"
+  let counter_variable = a:namespace .. "_counter"
+  if has_key(s:, list_variable)
+    call assert_true(has_key(s:, counter_variable))
+    call assert_true(has_key(s:, callback_variable))
+    return function("s:ListAggregator", [a:namespace, a:idx])
+  endif
+
+  let s:[list_variable] = []
+  let s:[callback_variable] = function(a:cb)
+  let s:[counter_variable] = a:num_callbacks
+  return function("s:ListAggregator", [a:namespace, a:idx])
+endfunction
+
+function! s:ListAggregator(namespace, idx, value)
+  let list_variable = a:namespace .. "_list"
+  let callback_variable = a:namespace .. "_callback"
+  let counter_variable = a:namespace .. "_counter"
+  if !has_key(s:, list_variable) || type(s:[list_variable]) != v:t_list
+    return init#Warn("List aggregation failed!")
+  endif
+
+  call add(s:[list_variable], [a:idx, a:value])
+  let s:[counter_variable] -= 1
+  if s:[counter_variable] <= 0
+    let Cb = s:[callback_variable]
+    let list = s:[list_variable]
+    unlet s:[callback_variable]
+    unlet s:[list_variable]
+    unlet s:[counter_variable]
+    call Cb(list)
+  endif
+endfunction
 
 function! init#AppendChunks(bufnr, lnum, chunks)
   let line = join(map(copy(a:chunks), "v:val[0]"), '')
@@ -472,27 +508,6 @@ function! init#ToClipboard(msg)
   else
     echo "Copied to clipboard (truncated)."
   endif
-endfunction
-
-function init#IsWorkspace(str)
-  " SSH connections will report the same workspace (how you last left your desktop).
-  if !empty($SSH_CONNECTION)
-    return v:false
-  endif
-
-  let ws = systemlist("qdbus org.kde.KWin /KWin org.kde.KWin.currentDesktop")
-  if v:shell_error
-    call init#Warn("qdbus command failed!")
-    return v:flase
-  endif
-  return ws[0] == a:str
-endfunction
-
-function init#IsMainWorkspace()
-  if !empty($SSH_MAIN_CONNECTION)
-    return v:true
-  endif
-  return init#IsWorkspace("2")
 endfunction
 
 function! s:ScriptLocalVars()
@@ -854,16 +869,29 @@ function! init#GetMakeCommand(...)
   return command
 endfunction
 
-command! -nargs=0 -bang Make call qutil#Make(init#GetMakeCommand(), "<bang>")
+command! -nargs=0 -bang Make call qutil#Make(init#GetMakeCommand(), #{preview: v:true})
 command! -nargs=0 Clean call system("rm -rf " . FugitiveFind(g:BUILD_TYPE))
 command! -nargs=0 -bang Remake exe "Clean" | exe "Make<bang>"
 
 nnoremap <silent> <leader>re :Make<CR>
 
 function s:PushCommand(bang)
+  if s:is_work_pc
+    let repo = split(FugitiveWorkTree(), "/")[-1]
+    if repo == "device-health"
+      let choice = confirm("Did you tell Koce?", "&Yes\n&No", 0)
+      if choice != 1
+        echo "Aborting command..."
+        return
+      endif
+      messages clear
+    endif
+  endif
+
   if !git#PushCommand(a:bang)
     return
   endif
+
   if s:is_work_pc
     let issue = work#BranchIssueNumber()
     if !empty(issue) && exists('*work#OpenJira')
@@ -1891,7 +1919,6 @@ function! init#OnFindData(data)
   call qutil#DropInQuickfix(a:data, 'Find')
 endfunction
 
-" command! -nargs=? Find call )->qutil#CommandPass(<q-args>)->qutil#DropInQuickfix('Find')
 command! -nargs=? Find call qsearch#OnFiles(getcwd(), ["-name", "*" . <q-args> . "*"], 'init#OnFindData')
 
 function! TypeHierarchyHandler(res, encoding)
@@ -2117,29 +2144,30 @@ function! init#Sshfs(remote, args)
   silent exe "drop scp://" . a:remote . "/" . a:args
 endfunction
 
-function! init#Scp(remote, bang, path)
-  if empty(a:bang)
-    let cmd = printf("rsync -pt %s %s:%s", expand("%:p"), a:remote, a:path)
-  else
-    let cmd = printf("rsync -pt %s:%s %s/Downloads", a:remote, a:path, $HOME)
-  endif
-
+function! init#Scp(remote, path)
+  let cmd = printf("rsync -pt %s %s:%s", expand("%:p"), a:remote, a:path)
   let ret = systemlist(cmd)
   if v:shell_error
     call init#ShowErrors(ret)
-  elseif empty(a:bang)
-    echo "Copied to " .. a:path .. "."
   else
-    echo "Downloaded " .. a:path .. "."
+    echo "Copied to " .. a:path .. "."
   endif
 endfunction
 
 function! init#RemoteFindFiles(remote, p)
   let regex = '.*' .. a:p .. '.*'
   let file_args = printf('-type f -regex "%s"', regex)
-  let cmd = printf('find / -path /proc -prune -type f -o -path /sys -prune -type f -o \( %s \)', file_args)
+  let cmd = printf('find / \( -path /proc -o -path /sys -o -path /run \) -prune -o \( %s -print \)', file_args)
   let files = systemlist(["ssh", a:remote, cmd])
   return v:shell_error ? [] : files
+endfunction
+
+function! init#RemoteFindBasenames(remote, p)
+  let regex = '*' .. a:p .. '*'
+  let file_args = printf('-type f -iname "%s"', regex)
+  let cmd = printf('find / \( -path /proc -o -path /sys -o -path /run \) -prune -o \( %s -print \)', file_args)
+  let files = systemlist(["ssh", a:remote, cmd])
+  return v:shell_error ? [] : map(files, "fnamemodify(v:val, ':t')")
 endfunction
 
 function! init#RemoteRecentFiles(remote, ...)
