@@ -142,8 +142,16 @@ vim.lsp.handlers["textDocument/clangd.fileStatus"] = function(_, res, _, _)
   vim.fn.UpdateLspStatus(file, res.state)
 end
 
+local MakePositionParams = function()
+  local client = vim.lsp.get_clients({ bufnr = 0 })[1]
+  if not client then
+    return
+  end
+  return vim.lsp.util.make_position_params(0, client.offset_encoding)
+end
+
 local RequestBaseClass = function()
-  local params = vim.lsp.util.make_position_params()
+  local params = MakePositionParams()
   params.resolve = 1
   params.direction = 1
 
@@ -161,7 +169,7 @@ local RequestBaseClass = function()
 end
 
 local RequestDerivedClass = function()
-  local params = vim.lsp.util.make_position_params()
+  local params = MakePositionParams()
   params.resolve = 1
   params.direction = 0
 
@@ -179,7 +187,7 @@ local RequestDerivedClass = function()
 end
 
 local RequestReferenceContainer = function()
-  local params = vim.lsp.util.make_position_params()
+  local params = MakePositionParams()
   local handler = function(_, res, _, _)
     if not res or vim.tbl_isempty(res) then
       vim.notify('No results')
@@ -199,7 +207,6 @@ function ShowAutoCompletion(...)
   local vargs = ({...})[1]
   local force_full = vargs ~= nil
 
-  local bufnr = api.nvim_get_current_buf()
   local pos = api.nvim_win_get_cursor(0)
   local cursor_pos = pos[2]
   local line = api.nvim_get_current_line()
@@ -208,7 +215,7 @@ function ShowAutoCompletion(...)
     return
   end
 
-  local params = vim.lsp.util.make_position_params()
+  local params = MakePositionParams()
   local handler = function(err, res, _)
     if err or not res or vim.tbl_isempty(res) then
       return
@@ -237,6 +244,7 @@ function ShowAutoCompletion(...)
     end
   end
 
+  local bufnr = api.nvim_get_current_buf()
   vim.lsp.buf_request(bufnr, 'textDocument/completion', params, handler)
 end
 
