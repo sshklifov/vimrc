@@ -53,8 +53,16 @@ exe printf("autocmd BufWritePost %s source %s", s:this_file_path, s:this_file_pa
 """"""""""""""""""""""""""""Plugin settings"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-" This script
-let g:auto_index_whitelist = ["obsidian-video", "libalcatraz"]
+function! s:ShowPlugins(pat)
+  let dir = g:plug_home
+  let pat = printf("*%s*.vim", a:pat)
+  let files = qsearch#GetFiles(dir, "-name", pat)
+  let n = len(dir) + 1
+  let items = map(copy(files), "#{filename: v:val, text: split(v:val[n:], '/')[0]}")
+  call qutil#SetQuickfix(items, "Plugins", #{dir: dir, oneshot: v:true})
+endfunction
+
+command! -nargs=? Vs call s:ShowPlugins(<q-args>)
 
 " sshklifov/git
 let g:git_install = 1
@@ -116,7 +124,11 @@ function! s:Rename(arg)
 
   let lua_str = 'lua vim.lsp.util.rename("' . oldname . '", "' . newname . '")'
   exe lua_str
-  LspRestart
+  call s:LspRestart()
+endfunction
+
+function s:LspRestart()
+  call init#Warn("Please restart neovim!")
 endfunction
 
 command! -nargs=1 -complete=file Rename call <SID>Rename(<q-args>)
@@ -571,7 +583,7 @@ command! -nargs=? List call s:RecentFiles(<q-args>)
 " Open vimrc quick (muy importante)
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
 nnoremap <silent> <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
-nnoremap <silent> <leader>wv :e ~/.local/share/nvim/plugged/work/plugin/work.vim<CR>
+nnoremap <silent> <leader>wv :Vs work<CR>
 
 " Indentation settings
 set expandtab
@@ -806,8 +818,7 @@ function! BuildStatusLine()
   endif
 endfunction
 
-set statusline=
-set statusline+=%(%{HostStatusLine()}%{%BuildStatusLine()%}\ %)
+set statusline=%(%{HostStatusLine()}%{%BuildStatusLine()%}\ %)
 set statusline+=%(%{BranchStatusLine()}\ %)
 set statusline+=%(%{GetFileStatusLine()}\ %{GetProgressStatusLine()}%m%h%r%)
 set statusline+=%=
@@ -1223,7 +1234,7 @@ function! init#CreateClangd()
   quit
 endfunction
 
-command! -nargs=0 -bar Clangd call init#CreateClangd() | LspRestart
+command! -nargs=0 -bar Clangd call init#CreateClangd() | call s:LspRestart()
 
 function! s:CheckClangd(repo)
   if len(a:repo) <= 0
@@ -1792,7 +1803,7 @@ endfunction
 """"""""""""""""""""""""""""LSP"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:TruncateLspLog()
-  let logs = [$NVIM_LOG_FILE, luaeval("vim.lsp.get_log_path()")]
+  let logs = [$NVIM_LOG_FILE, luaeval("vim.lsp.log.get_filename()")]
   for log in logs
     if filereadable(log)
       let size = getfsize(log)
@@ -1898,22 +1909,23 @@ command! -nargs=? -complete=customlist,HeaderCompl Header call s:GetHeader()->qu
 
 command! -nargs=? -complete=customlist,HeaderCompl H exe "Header " .. <q-args>
 
-function! s:GetWorkFiles()
+function! s:GetWorkFiles(pat)
   let dir = FugitiveWorkTree()
   if !isdirectory(dir)
     return []
   endif
-  return qsearch#GetFiles(dir)
+  let pat = printf("*%s*", a:pat)
+  return qsearch#GetFiles(dir, "-name", pat)
 endfunction
 
 function! WorkFilesCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return s:GetWorkFiles()->qutil#ComponentCompletionPass(a:ArgLead)
+  return s:GetWorkFiles(a:ArgLead)
 endfunction
 
-command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles()->qutil#CommandPass(<q-args>)->qutil#DropInQuickfix('Workfiles')
+command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles(<q-args>)->qutil#DropInQuickfix('Workfiles')
 
 function! init#OnFindData(data)
   call qutil#DropInQuickfix(a:data, 'Find')
