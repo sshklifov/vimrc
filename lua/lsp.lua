@@ -278,7 +278,7 @@ function CheckFormat(bufnr)
   end
 
   for _, client in ipairs(clients) do
-    if client.supports_method(method) then
+    if client:supports_method(method) then
       local params = vim.lsp.util.make_formatting_params({})
       local result, err = client:request_sync(method, params, opts.timeout_ms, bufnr)
       if result and result.result then

@@ -904,7 +904,7 @@ function s:PushCommand(bang)
   endif
 
   if s:is_work_pc
-    let issue = work#BranchIssueNumber()
+    let issue = work#ExtractIssue()
     if !empty(issue) && exists('*work#OpenJira')
       return work#OpenJira(issue)
     endif
@@ -1822,7 +1822,7 @@ autocmd VimEnter * call s:TruncateLspLog()
 command! -nargs=0 LspStop lua vim.lsp.stop_client(vim.lsp.get_active_clients())
 command! -nargs=0 LspProg lua print(vim.inspect(vim.lsp.status()))
 
-command! -nargs=0 -range For lua vim.lsp.buf.format{ range = {start= {<line1>, 0}, ["end"] = {<line2>, 0}} }
+command! -nargs=0 -range=% For lua vim.lsp.buf.format{ range = {start= {<line1>, 0}, ["end"] = {<line2>, 0}} }
 nnoremap <expr> <leader>for init#Operator("For", 1)
 vnoremap <silent> <leader>for :For<CR>
 
@@ -1922,7 +1922,8 @@ function! WorkFilesCompl(ArgLead, CmdLine, CursorPos)
   if a:CursorPos < len(a:CmdLine)
     return []
   endif
-  return s:GetWorkFiles(a:ArgLead)
+  let files = s:GetWorkFiles(a:ArgLead)
+  return map(files, 'fnamemodify(v:val, ":t")')
 endfunction
 
 command! -nargs=? -complete=customlist,WorkFilesCompl Workfiles call s:GetWorkFiles(<q-args>)->qutil#DropInQuickfix('Workfiles')
