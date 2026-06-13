@@ -175,7 +175,7 @@ func init#Get(what, ...)
     if type(result) == v:t_dict && !has_key(result, key)
       return default
     endif
-    if type(result) == v:t_list && len(result) >= key
+    if type(result) == v:t_list && key >= len(result)
       return default
     endif
     let result = result[key]
@@ -312,39 +312,49 @@ function! init#Jobstart(cmds, ...)
   else
     let id = jobstart(a:cmds)
   endif
-  if !exists('s:job_list')
-    let s:job_list = []
+  if !exists('s:job_map')
+    let s:job_map = #{}
   endif
   if type(a:cmds) == type([])
     let args = join(a:cmds)
   else
     let args = a:cmds
   endif
-  call add(s:job_list, #{id: id, args: args})
+  let s:job_map[id] = #{args: args}
   return id
 endfunction
 
+function! init#Termopen(cmds, ...)
+  let opts = get(a:000, 0, #{})
+  let opts['term'] = v:true
+  return init#Jobstart(a:cmds, opts)
+endfunction
+
 function! s:ShowJobs()
-  if !exists('s:job_list')
+  if !exists('s:job_map')
     echo "No jobs."
     return
   endif
 
-  for j in s:job_list
+  const keys = keys(s:job_map)
+  const values = values(s:job_map)
+  for id in keys
+    let j = s:job_map[id]
     if !has_key(j, 'exitted')
-      silent! let pid = jobpid(j.id)
+      silent! let pid = jobpid(str2nr(id))
       if pid <= 0
         let j['exitted'] = 1
       endif
     endif
   endfor
-  let lines = map(copy(s:job_list), 'v:val.args')
+  let lines = map(copy(values), 'v:val.args')
   call init#CustomBottomBuffer('Jobs', lines)
 
-  let exitted = map(copy(s:job_list), 'has_key(v:val, "exitted")')
   let ns = nvim_create_namespace('jobs')
-  for i in range(len(exitted))
-    if exitted[i]
+  for i in range(len(values))
+    if get(values[i], "failed", v:false)
+      call nvim_buf_set_extmark(bufnr(), ns, i, 0, #{line_hl_group: "ErrorMsg"})
+    elseif get(values[i], "exitted", v:false)
       call nvim_buf_set_extmark(bufnr(), ns, i, 0, #{line_hl_group: "Conceal"})
     endif
   endfor
@@ -415,15 +425,36 @@ function! init#OnJobSuccess(cmds, cb, ...)
   else
     let job_name = split(a:cmds)[0]
   endif
-  return init#Jobstart(a:cmds, #{on_exit: function('s:CheckJobSuccess', [job_name, Cb])})
+  let opts = #{
+        \ on_exit: function('s:CheckJobSuccess', [job_name, Cb]),
+        \ on_stderr: function("s:CaptureJobStderr"),
+        \ stderr_buffered: v:true
+        \ }
+  return init#Jobstart(a:cmds, opts)
 endfunction
 
-function s:CheckJobSuccess(job_name, Cb, _0, code, _1)
+function s:CaptureJobStderr(job, data, ...)
+  if has_key(s:job_map, a:job)
+    let s:job_map[a:job]["stderr"] = a:data
+  endif
+endfunction
+
+function s:CheckJobSuccess(job_name, Cb, job, code, _1)
+  let stderr = []
+  if has_key(s:job_map, a:job) && has_key(s:job_map[a:job], 'stderr')
+    let stderr = s:job_map[a:job]['stderr']
+    unlet s:job_map[a:job]['stderr']
+  endif
+
   if a:code == 0
     call a:Cb()
   else
     let msg = printf("Job '%s' failed", a:job_name)
     call init#Warn(msg)
+    let s:job_map[a:job]['failed'] = v:true
+    if !empty(stderr)
+      call init#ShowErrors(stderr)
+    endif
   endif
 endfunction
 
@@ -435,7 +466,7 @@ function! init#OnJobFail(cmds, cb, ...)
   else
     let job_name = split(a:cmds)[0]
   endif
-  return init#Jobstart(a:cmds, #{on_exit: {_0, code, _1 -> code != 0 ? Cb()}})
+  return init#Jobstart(a:cmds, #{on_exit: {_0, code, _1 -> code != 0 ? Cb() : 0}})
 endfunction
 
 function! init#IsVisible(bufname)
@@ -565,7 +596,7 @@ function! s:RecentBuffers()
   call qutil#SetQuickfix(buffers, 'Recent buffers')
 endfunction
 
-command! -nargs=0 Buffers call s:RecentBuffers()
+command! -nargs=0 Recent call s:RecentBuffers()
 
 autocmd BufEnter * call s:OnBufferEnter()
 
@@ -751,7 +782,7 @@ endfunction
 let g:statusline_dict = #{}
 " Must register modules here. When multiple modules have progress output, items at the front of the
 " list will take precedence
-let g:statusline_prio = ['sync', 'make', 'lsp', 'rsi']
+let g:statusline_prio = ['sync', 'make', 'jenkins', 'lsp', 'rsi']
 
 function! OnStatusDictChange(...)
   redrawstatus
@@ -789,19 +820,15 @@ function! BranchStatusLine()
 endfunction
 
 function! HostStatusLine()
-  if exists('g:HOST') && g:HOST != s:default_host
+  if exists('g:HOST')
     if !work#GetHostStatus()
-      return "(- " .. g:HOST .. ")"
+      return "%#Conceal#(" .. g:HOST .. ")%#StatusLine#"
     else
       return "(" .. g:HOST .. ")"
     endif
-   else
-    if exists("*work#GetHostStatus") && !work#GetHostStatus()
-      return "(- " .. g:HOST .. ")"
-    else
-      return ""
-    endif
-   endif
+  else
+    return ""
+  endif
 endfunction
 
 function! BuildStatusLine()
@@ -818,7 +845,7 @@ function! BuildStatusLine()
   endif
 endfunction
 
-set statusline=%(%{HostStatusLine()}%{%BuildStatusLine()%}\ %)
+set statusline=%(%{%HostStatusLine()%}%{%BuildStatusLine()%}\ %)
 set statusline+=%(%{BranchStatusLine()}\ %)
 set statusline+=%(%{GetFileStatusLine()}\ %{GetProgressStatusLine()}%m%h%r%)
 set statusline+=%=
@@ -913,8 +940,16 @@ endfunction
 
 command! -nargs=0 -bang Push call s:PushCommand("<bang>")
 
+function! init#GetHistory(...)
+  let hist = map(range(1, histnr(':')), 'histget(":", v:val)')
+  if a:0 > 0
+    call filter(hist, 'stridx(v:val, a:1) == 0')
+  endif
+  return reverse(hist)
+endfunction
+
 function! s:ShowHistory(CmdLine)
-  let result = init#HistFind(a:CmdLine)
+  let result = init#GetHistory(a:CmdLine)
   call qutil#CreateOneShotQuickfix(result, 'History', expand('<SID>') .. 'SelectCommand')
 endfunction
 
@@ -1069,6 +1104,41 @@ set pumheight=10
 inoremap {<CR> {<CR>}<C-o>O
 
 nmap <leader>sp :setlocal invspell<CR>
+
+function! s:ClaudeInteractive(bang, args) range
+  let root = FugitiveWorkTree()
+  if empty(root)
+    let root = getcwd()
+  endif
+  let filename  = expand('%:p')
+  if !empty(a:bang)
+    let prompt = a:args
+  elseif filereadable(filename)
+    let marker = ""
+    if stridx(filename, root) == 0
+      let filename = filename[len(root):]
+      if filename[0] == '/'
+        let filename = filename[1:]
+      endif
+      let marker = "@"
+    endif
+    let whole_file = a:firstline == 1 && a:lastline == line('$')
+    if whole_file
+      let prompt = printf('In %s%s: %s', marker, filename, a:args)
+    else
+      let prompt = printf('In %s%s lines %d-%d: %s', marker, filename, a:firstline, a:lastline, a:args)
+    endif
+  else
+    let context = join(getline(a:firstline, a:lastline), "\n")
+    let prompt = printf("%s\n%s", a:args, context)
+  endif
+  below sp
+  enew
+  call init#Termopen(["claude", prompt], #{cwd: root})
+  startinsert
+endfunction
+
+command! -bang -nargs=* -range=% Claude <line1>,<line2>call s:ClaudeInteractive("<bang>", <q-args>)
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
@@ -1361,27 +1431,6 @@ function s:OpenStackTrace()
 endfunction
 
 command! -nargs=0 Crashtrace call s:OpenStackTrace()
-
-function! init#HistFind(...)
-  " XXX becuase of E464 this is mostly ok
-  let f_list = []
-  for cmd_prefix in a:000
-    call add(f_list, printf('stridx(v:val, "%s") == 0', cmd_prefix))
-  endfor
-  let f_str = join(f_list, ' || ')
-
-  let hist = map(range(1, histnr(':')), 'histget(":", v:val)')
-  return reverse(filter(hist, f_str))
-endfunction
-
-function! HistoryCompl(ArgLead, CmdLine, CursorPos)
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  let prefix = len(a:CmdLine) - len(a:ArgLead)
-  let result = init#HistFind(a:CmdLine)
-  return map(result, 'v:val[prefix:]')
-endfunction
 "}}}
 
 """"""""""""""""""""""""""""Debugging"""""""""""""""""""""""""""" {{{
@@ -2147,10 +2196,15 @@ function! init#RemoteAttach(host, proc, ...)
   endif
 endfunction
 
-function! init#SshTerm(remote)
-  tabnew
+function! init#SshTerminal(bang)
+  below sp
+  enew
+  if empty(a:bang)
+    terminal
+  else
+    call init#Termopen(["ssh", g:HOST])
+  endif
   startinsert
-  let id = termopen(["ssh", a:remote])
 endfunction
 
 function! init#Sshfs(remote, args)
