@@ -52,17 +52,29 @@ exe printf("autocmd BufWritePost %s source %s", s:this_file_path, s:this_file_pa
 
 """"""""""""""""""""""""""""Plugin settings"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-function! s:ShowPlugins(pat)
+function! s:GetPlugins(pat)
   let dir = g:plug_home
   let pat = printf("*%s*.vim", a:pat)
-  let files = qsearch#GetFiles(dir, "-name", pat)
+  return qsearch#GetFiles(dir, "-name", pat)
+endfunction
+
+function! s:ShowPlugins(pat)
+  let files = s:GetPlugins(a:pat)
+  const dir = g:plug_home
   let n = len(dir) + 1
   let items = map(copy(files), "#{filename: v:val, text: split(v:val[n:], '/')[0]}")
   call qutil#SetQuickfix(items, "Plugins", #{dir: dir, oneshot: v:true})
 endfunction
 
-command! -nargs=? Vs call s:ShowPlugins(<q-args>)
+function! VimscriptCompl(ArgLead, CmdLine, CursorPos)
+  if a:CursorPos < len(a:CmdLine)
+    return []
+  endif
+  let files = s:GetPlugins(a:ArgLead)
+  return map(files, 'fnamemodify(v:val, ":t:r")')
+endfunction
+
+command! -nargs=? -complete=customlist,VimscriptCompl Vs call s:ShowPlugins(<q-args>)
 
 " sshklifov/git
 let g:git_install = 1
@@ -71,12 +83,12 @@ set foldopen=block,hor,jump,mark,quickfix,undo
 
 " sshklifov/work
 if s:is_work_pc
-  let g:RSYNC_DIR = "/var/tmp"
-  let s:default_host = "p15"
-  if !exists('g:HOST')
-    let g:HOST = s:default_host
-    let g:DEVICE = "p15"
-  endif
+  " TODO might bug out
+  " let g:RSYNC_DIR = "/var/tmp"
+  " if !exists('g:HOST')
+    " let g:HOST = s:default_host
+    " let g:DEVICE = "p15"
+  " endif
   call plug#load('work')
 endif
 
@@ -164,6 +176,13 @@ set diffopt+=vertical
 function! init#GetState()
   return deepcopy(s:)
 endfunction
+
+function! s:LockScreen()
+  call init#SystemOrThrow("cinnamon-screensaver-command --lock")
+endfunction
+
+command! -nargs=0 Lock call s:LockScreen()
+command! -nargs=0 L call s:LockScreen()
 
 func init#Get(what, ...)
   if type(a:what) != v:t_dict && type(a:what) != v:t_list
@@ -283,6 +302,15 @@ function! init#CustomBottomBuffer(name, lines)
   return nr
 endfunction
 
+function! init#OpenBuffer(nr)
+  let wins = win_findbuf(a:nr)
+  if !empty(wins)
+    call win_gotoid(wins[0])
+  else
+    exe 'bot sb ' .. a:nr
+  endif
+endfunction
+
 function! init#OnTermSuccess(id, cb, ...)
   let id = str2nr(a:id)
   let info = nvim_get_chan_info(id)
@@ -320,14 +348,16 @@ function! init#Jobstart(cmds, ...)
   else
     let args = a:cmds
   endif
-  let s:job_map[id] = #{args: args}
+  let s:job_map[id] = #{args: args, tag: 'init#Jobstart'}
   return id
 endfunction
 
 function! init#Termopen(cmds, ...)
   let opts = get(a:000, 0, #{})
   let opts['term'] = v:true
-  return init#Jobstart(a:cmds, opts)
+  let id = init#Jobstart(a:cmds, opts)
+  let s:job_map[id]['tag'] = 'init#Termopen'
+  return id
 endfunction
 
 function! s:ShowJobs()
@@ -348,26 +378,45 @@ function! s:ShowJobs()
     endif
   endfor
   let lines = map(copy(values), 'v:val.args')
-  call init#CustomBottomBuffer('Jobs', lines)
+  let nr = qutil#CreateCustomQuickfix(lines, 'Jobs', expand('<SID>') .. 'SelectJob')
+  call setbufvar(nr, 'jobids', keys)
 
   let ns = nvim_create_namespace('jobs')
   for i in range(len(values))
     if get(values[i], "failed", v:false)
-      call nvim_buf_set_extmark(bufnr(), ns, i, 0, #{line_hl_group: "ErrorMsg"})
+      call nvim_buf_set_extmark(nr, ns, i, 0, #{line_hl_group: "ErrorMsg"})
     elseif get(values[i], "exitted", v:false)
-      call nvim_buf_set_extmark(bufnr(), ns, i, 0, #{line_hl_group: "Conceal"})
+      call nvim_buf_set_extmark(nr, ns, i, 0, #{line_hl_group: "Conceal"})
     endif
   endfor
 endfunction
 
+function! s:SelectJob()
+  let id = b:jobids[line('.') - 1]
+  let info = nvim_get_chan_info(str2nr(id))
+  if has_key(info, 'buffer')
+    call init#OpenBuffer(info.buffer)
+  elseif has_key(s:job_map[id], 'output')
+    call init#CustomBottomBuffer('Job Output', s:job_map[id]['output'])
+  else
+    echo "Nothing appropriate for " .. s:job_map[id]['tag']
+  endif
+endfunction
+
 command! -nargs=0 Jobs call s:ShowJobs()
+
+function! s:ForwardOutput(Cb, id, data, ...)
+  call extend(s:job_map[a:id], #{output: a:data})
+  call a:Cb(a:data)
+endfunction
 
 function! init#OnJobProcess(cmds, input, cb, ...)
   call assert_true(type(a:cb) == v:t_string)
   call assert_true(type(a:input) == v:t_list)
   let Cb = function(a:cb, a:000)
-  let WrapCb = {_0, data, _1 -> Cb(data) }
+  let WrapCb = function('s:ForwardOutput', [Cb])
   let id = init#Jobstart(a:cmds, #{stdout_buffered: v:true, on_stdout: WrapCb})
+  let s:job_map[id]['tag'] = 'init#OnJobProcess'
 
   call chansend(id, a:input)
   call chanclose(id, 'stdin')
@@ -377,8 +426,10 @@ endfunction
 function! init#OnJobOutput(cmds, cb, ...)
   call assert_true(type(a:cb) == v:t_string)
   let Cb = function(a:cb, a:000)
-  let WrapCb = {_0, data, _1 -> Cb(data) }
-  return init#Jobstart(a:cmds, #{stdout_buffered: v:true, on_stdout: WrapCb})
+  let WrapCb = function('s:ForwardOutput', [Cb])
+  let id = init#Jobstart(a:cmds, #{stdout_buffered: v:true, on_stdout: WrapCb})
+  let s:job_map[id]['tag'] = 'init#OnJobOutput'
+  return id
 endfunction
 
 function! init#OnJobExit(cmds, cb, ...)
@@ -389,7 +440,9 @@ function! init#OnJobExit(cmds, cb, ...)
   else
     let job_name = split(a:cmds)[0]
   endif
-  return init#Jobstart(a:cmds, #{on_exit: {_0, code, _2 -> Cb(code)}})
+  let id = init#Jobstart(a:cmds, #{on_exit: {_0, code, _2 -> Cb(code)}})
+  let s:job_map[id]['tag'] = 'init#OnJobExit'
+  return id
 endfunction
 
 function! s:RunPdp()
@@ -516,6 +569,35 @@ function init#TryCall(what, ...)
     return Partial()
   catch
     echom v:exception
+  endtry
+endfunction
+
+function init#Dispatch(class, prefix, ...)
+  let cmd = get(a:000, 0, '')
+  let args = a:000[1:]
+  if empty(cmd)
+    let hist = filter(map(init#GetHistory(a:class), "split(v:val)"), 'len(v:val) >= 2')
+    if empty(hist)
+      echo "No previous " .. a:class .. " command"
+      return
+    endif
+    let [_, cmd; args] = hist[0]
+  endif
+  " <SID> from a command repl arrives as key-code bytes; getcompletion needs
+  " the textual <SNR>N_ form. (No-op when called from script/function context.)
+  let prefix = substitute(a:prefix, "\<SNR>", "<SNR>", "")
+  let candidates = getcompletion(prefix, 'function')
+  call map(candidates, 'substitute(v:val, "(.*$", "", "")')
+  call filter(candidates, 'strpart(v:val, len(prefix)) =~? cmd')
+  if len(candidates) != 1
+    echo printf("Cannot dispatch %s...", cmd)
+    return
+  endif
+  let Partial = function(candidates[0], args)
+  try
+    call Partial()
+  catch
+    echo v:exception
   endtry
 endfunction
 
