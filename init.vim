@@ -335,11 +335,16 @@ function! init#OnBufDelete(nr, cb, ...)
 endfunction
 
 function! init#Jobstart(cmds, ...)
-  if a:0 > 0
-    let id = jobstart(a:cmds, a:1)
-  else
-    let id = jobstart(a:cmds)
+  let opts = get(a:000, 0, #{})
+  " Track exit status for every job, forwarding to any on_exit the caller gave.
+  let UserExit = get(opts, 'on_exit', v:null)
+  let opts['on_exit'] = function('s:ForwardExit', [UserExit])
+  " Capture stderr only when the caller isn't already handling it.
+  if !has_key(opts, 'on_stderr')
+    let opts['on_stderr'] = function('s:CaptureStderr')
+    let opts['stderr_buffered'] = v:true
   endif
+  let id = jobstart(a:cmds, opts)
   if !exists('s:job_map')
     let s:job_map = #{}
   endif
@@ -350,6 +355,27 @@ function! init#Jobstart(cmds, ...)
   endif
   let s:job_map[id] = #{args: args, tag: 'init#Jobstart'}
   return id
+endfunction
+
+function! s:CaptureStderr(id, data, ...)
+  if has_key(s:job_map, a:id)
+    call extend(s:job_map[a:id], #{error: a:data})
+  endif
+endfunction
+
+function! s:CaptureStdout(id, data, ...)
+  if has_key(s:job_map, a:id)
+    call extend(s:job_map[a:id], #{output: a:data})
+  endif
+endfunction
+
+function! s:ForwardExit(Cb, id, code, event)
+  if has_key(s:job_map, a:id)
+    let s:job_map[a:id]['failed'] = a:code != 0
+  endif
+  if !empty(a:Cb)
+    call a:Cb(a:id, a:code, a:event)
+  endif
 endfunction
 
 function! init#Termopen(cmds, ...)
@@ -398,6 +424,8 @@ function! s:SelectJob()
     call init#OpenBuffer(info.buffer)
   elseif has_key(s:job_map[id], 'output')
     call init#CustomBottomBuffer('Job Output', s:job_map[id]['output'])
+  elseif has_key(s:job_map[id], 'error')
+    call init#CustomBottomBuffer('Job Stderr', s:job_map[id]['error'])
   else
     echo "Nothing appropriate for " .. s:job_map[id]['tag']
   endif
@@ -445,6 +473,37 @@ function! init#OnJobExit(cmds, cb, ...)
   return id
 endfunction
 
+" Run a:cmds and, on exit, call a:cb with a result dict holding the requested
+" fields. a:fields is a dict with any of #{stdout, stderr, exit_code} set true;
+" the result dict is keyed by those same names.
+function! s:ForwardResult(Cb, fields, id, code, event)
+  let result = #{}
+  if get(a:fields, 'stdout', v:false)
+    let result['stdout'] = get(s:job_map[a:id], 'output', [])
+  endif
+  if get(a:fields, 'stderr', v:false)
+    let result['stderr'] = get(s:job_map[a:id], 'error', [])
+  endif
+  if get(a:fields, 'exit_code', v:false)
+    let result['exit_code'] = a:code
+  endif
+  call a:Cb(result)
+endfunction
+
+function! init#OnJobResult(cmds, fields, cb, ...)
+  call assert_true(type(a:cb) == v:t_string)
+  call assert_true(type(a:fields) == v:t_dict)
+  let Cb = function(a:cb, a:000)
+  let opts = #{on_exit: function('s:ForwardResult', [Cb, a:fields])}
+  if get(a:fields, 'stdout', v:false)
+    let opts['on_stdout'] = function('s:CaptureStdout')
+    let opts['stdout_buffered'] = v:true
+  endif
+  let id = init#Jobstart(a:cmds, opts)
+  let s:job_map[id]['tag'] = 'init#OnJobResult'
+  return id
+endfunction
+
 function! s:RunPdp()
   let exe = printf('/home/stef/Downloads/pdp/%s/pdp', g:BUILD_TYPE)
   let opts = #{rpc: v:true, on_exit: {_0, code, _2 -> s:OnPdpExit(code)}}
@@ -488,15 +547,14 @@ endfunction
 
 function s:CaptureJobStderr(job, data, ...)
   if has_key(s:job_map, a:job)
-    let s:job_map[a:job]["stderr"] = a:data
+    let s:job_map[a:job]["error"] = a:data
   endif
 endfunction
 
 function s:CheckJobSuccess(job_name, Cb, job, code, _1)
   let stderr = []
-  if has_key(s:job_map, a:job) && has_key(s:job_map[a:job], 'stderr')
-    let stderr = s:job_map[a:job]['stderr']
-    unlet s:job_map[a:job]['stderr']
+  if has_key(s:job_map, a:job) && has_key(s:job_map[a:job], 'error')
+    let stderr = s:job_map[a:job]['error']
   endif
 
   if a:code == 0
@@ -1192,31 +1250,35 @@ function! s:ClaudeInteractive(bang, args) range
   if empty(root)
     let root = getcwd()
   endif
-  let filename  = expand('%:p')
+  let filename = expand('%:p')
   if !empty(a:bang)
-    let prompt = a:args
-  elseif filereadable(filename)
-    let marker = ""
-    if stridx(filename, root) == 0
-      let filename = filename[len(root):]
-      if filename[0] == '/'
-        let filename = filename[1:]
-      endif
-      let marker = "@"
-    endif
-    let whole_file = a:firstline == 1 && a:lastline == line('$')
-    if whole_file
-      let prompt = printf('In %s%s: %s', marker, filename, a:args)
-    else
-      let prompt = printf('In %s%s lines %d-%d: %s', marker, filename, a:firstline, a:lastline, a:args)
-    endif
+    let cmd = "claude " .. a:args
   else
-    let context = join(getline(a:firstline, a:lastline), "\n")
-    let prompt = printf("%s\n%s", a:args, context)
+    if filereadable(filename)
+      let marker = ""
+      if stridx(filename, root) == 0
+        let filename = filename[len(root):]
+        if filename[0] == '/'
+          let filename = filename[1:]
+        endif
+        let marker = "@"
+      endif
+      let whole_file = a:firstline == 1 && a:lastline == line('$')
+      if whole_file
+        let prompt = printf('In %s%s: %s', marker, filename, a:args)
+      else
+        let prompt = printf('In %s%s lines %d-%d: %s', marker, filename, a:firstline, a:lastline, a:args)
+      endif
+    else
+      let context = join(getline(a:firstline, a:lastline), "\n")
+      let prompt = printf("%s\n%s", a:args, context)
+    endif
+    let cmd = ["claude", prompt]
   endif
+
   below sp
   enew
-  call init#Termopen(["claude", prompt], #{cwd: root})
+  call init#Termopen(cmd, #{cwd: root})
   startinsert
 endfunction
 
@@ -2278,14 +2340,10 @@ function! init#RemoteAttach(host, proc, ...)
   endif
 endfunction
 
-function! init#SshTerminal(bang)
+function! init#SshTerminal()
   below sp
   enew
-  if empty(a:bang)
-    terminal
-  else
-    call init#Termopen(["ssh", g:HOST])
-  endif
+  call init#Termopen(["ssh", g:HOST])
   startinsert
 endfunction
 
