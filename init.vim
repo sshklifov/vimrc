@@ -54,7 +54,7 @@ exe printf("autocmd BufWritePost %s source %s", s:this_file_path, s:this_file_pa
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:GetPlugins(pat)
   let dir = g:plug_home
-  let pat = printf("*%s*.vim", a:pat)
+  let pat = printf("*%s*", a:pat)
   return qsearch#GetFiles(dir, "-name", pat)
 endfunction
 
@@ -71,7 +71,7 @@ function! VimscriptCompl(ArgLead, CmdLine, CursorPos)
     return []
   endif
   let files = s:GetPlugins(a:ArgLead)
-  return map(files, 'fnamemodify(v:val, ":t:r")')
+  return map(files, 'fnamemodify(v:val, ":t")')
 endfunction
 
 command! -nargs=? -complete=customlist,VimscriptCompl Vs call s:ShowPlugins(<q-args>)
@@ -95,9 +95,6 @@ endif
 if !exists('g:BUILD_TYPE')
   let g:BUILD_TYPE = "Release"
 endif
-
-" sshklifov/rsi
-command! -nargs=0 Rest Rsi EnterRest
 
 " sshklifov/debug
 let g:promptdebug_commands = 0
@@ -178,6 +175,7 @@ function! init#GetState()
 endfunction
 
 function! s:LockScreen()
+  call rsi#Rest()
   call init#SystemOrThrow("cinnamon-screensaver-command --lock")
 endfunction
 
@@ -384,6 +382,36 @@ function! init#Termopen(cmds, ...)
   let id = init#Jobstart(a:cmds, opts)
   let s:job_map[id]['tag'] = 'init#Termopen'
   return id
+endfunction
+
+" Hide a terminal opened by init#Termopen and only bring it back after `delay` ms
+function! init#TermHide(id, ...)
+  let delay = get(a:000, 0, 1000)
+  let id = str2nr(a:id)
+  let nr = nvim_get_chan_info(id)['buffer']
+  " Close the terminal's window(s); the job keeps running in the hidden buffer.
+  for win in win_findbuf(nr)
+    call win_gotoid(win)
+    if winnr('$') > 1
+      close
+    else
+      enew
+    endif
+  endfor
+  call timer_start(delay, {-> s:RevealTerm(id, nr)})
+  return id
+endfunction
+
+function! s:RevealTerm(id, nr)
+  if !bufexists(a:nr)
+    return
+  endif
+  if jobwait([a:id], 0)[0] != -1
+    " Job finished while hidden; discard the terminal buffer unseen.
+    exe 'silent! bw ' .. a:nr
+    return
+  endif
+  call init#OpenBuffer(a:nr)
 endfunction
 
 function! s:ShowJobs()
@@ -603,6 +631,17 @@ function! init#Unique(list)
   return map(order, 'v:val[0]')
 endfunction
 
+function! init#Max(list, Comp)
+  let max = a:list[0]
+  for item in a:list
+    let cmp = a:Comp(item, max)
+    if cmp > 0
+      let max = item
+    endif
+  endfor
+  return max
+endfunction
+
 function! init#ShowErrors(errors)
   let errors = map(a:errors, "strtrans(v:val)")
   if empty(errors)
@@ -615,7 +654,8 @@ endfunction
 function init#SystemOrThrow(args)
   let output = systemlist(a:args)
   if v:shell_error
-    call init#ShowErrors(output)
+    let info = string(a:args) .. " failed in directory: " .. string(getcwd())
+    call init#ShowErrors([info] + output)
     throw "System call failed!"
   endif
   return output
@@ -754,7 +794,7 @@ command! -nargs=? List call s:RecentFiles(<q-args>)
 " Open vimrc quick (muy importante)
 nnoremap <silent> <leader>ev :e ~/.config/nvim/init.vim<CR>
 nnoremap <silent> <leader>lv :e ~/.config/nvim/lua/lsp.lua<CR>
-nnoremap <silent> <leader>wv :Vs work<CR>
+nnoremap <silent> <leader>wv :Vs work.vim<CR>
 
 " Indentation settings
 set expandtab
@@ -1245,44 +1285,40 @@ inoremap {<CR> {<CR>}<C-o>O
 
 nmap <leader>sp :setlocal invspell<CR>
 
-function! s:ClaudeInteractive(bang, args) range
+function! s:ClaudeInteractive(args) range
   let root = FugitiveWorkTree()
   if empty(root)
     let root = getcwd()
   endif
+
   let filename = expand('%:p')
-  if !empty(a:bang)
-    let cmd = "claude " .. a:args
-  else
-    if filereadable(filename)
-      let marker = ""
-      if stridx(filename, root) == 0
-        let filename = filename[len(root):]
-        if filename[0] == '/'
-          let filename = filename[1:]
-        endif
-        let marker = "@"
+  if filereadable(filename)
+    let marker = ""
+    if stridx(filename, root) == 0
+      let filename = filename[len(root):]
+      if filename[0] == '/'
+        let filename = filename[1:]
       endif
-      let whole_file = a:firstline == 1 && a:lastline == line('$')
-      if whole_file
-        let prompt = printf('In %s%s: %s', marker, filename, a:args)
-      else
-        let prompt = printf('In %s%s lines %d-%d: %s', marker, filename, a:firstline, a:lastline, a:args)
-      endif
-    else
-      let context = join(getline(a:firstline, a:lastline), "\n")
-      let prompt = printf("%s\n%s", a:args, context)
+      let marker = "@"
     endif
-    let cmd = ["claude", prompt]
+    let whole_file = a:firstline == 1 && a:lastline == line('$')
+    if whole_file
+      let prompt = printf('In %s%s: %s', marker, filename, a:args)
+    else
+      let prompt = printf('In %s%s lines %d-%d: %s', marker, filename, a:firstline, a:lastline, a:args)
+    endif
+  else
+    let context = join(getline(a:firstline, a:lastline), "\n")
+    let prompt = printf("%s\n%s", a:args, context)
   endif
 
   below sp
   enew
-  call init#Termopen(cmd, #{cwd: root})
+  call init#Termopen(["claude", prompt], #{cwd: root})
   startinsert
 endfunction
 
-command! -bang -nargs=* -range=% Claude <line1>,<line2>call s:ClaudeInteractive("<bang>", <q-args>)
+command! -nargs=* -range=% Claude <line1>,<line2>call s:ClaudeInteractive(<q-args>)
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
@@ -2351,13 +2387,13 @@ function! init#Sshfs(remote, args)
   silent exe "drop scp://" . a:remote . "/" . a:args
 endfunction
 
-function! init#Scp(remote, path)
+function! init#Upload(remote, path)
   let cmd = printf("rsync -pt %s %s:%s", expand("%:p"), a:remote, a:path)
   let ret = systemlist(cmd)
   if v:shell_error
     call init#ShowErrors(ret)
   else
-    echo "Copied to " .. a:path .. "."
+    call init#ToClipboard(a:path)
   endif
 endfunction
 
@@ -2375,6 +2411,14 @@ function! init#RemoteFindBasenames(remote, p)
   let cmd = printf('find / \( -path /proc -o -path /sys -o -path /run \) -prune -o \( %s -print \)', file_args)
   let files = systemlist(["ssh", a:remote, cmd])
   return v:shell_error ? [] : map(files, "fnamemodify(v:val, ':t')")
+endfunction
+
+function! init#RemoteFindDirs(remote, p)
+  let regex = '.*' .. a:p .. '.*'
+  let dir_args = printf('-type d -regex "%s"', regex)
+  let cmd = printf('find / \( -path /proc -o -path /sys -o -path /run \) -prune -o \( %s -print \)', dir_args)
+  let dirs = systemlist(["ssh", a:remote, cmd])
+  return v:shell_error ? [] : dirs
 endfunction
 
 function! init#RemoteRecentFiles(remote, ...)
