@@ -19,6 +19,7 @@ Plug 'sshklifov/qsearch'
 Plug 'sshklifov/qutil'
 Plug 'sshklifov/rsi'
 Plug 'sshklifov/git'
+Plug 'sshklifov/claude'
 
 " TODO: Do I want to restore custom quickfix with <leader>cc?
 
@@ -157,6 +158,10 @@ endfunction
 
 command! -nargs=0 -bang Delete call <SID>Delete('<bang>')
 
+" Distrust modelines in arbitrary files (they can break loading, e.g. E518)
+set nomodeline
+autocmd FileType vim setlocal modeline
+
 " tpope/vim-commentary
 autocmd BufEnter *.fish setlocal commentstring=#\ %s
 autocmd FileType vim setlocal commentstring=\"\ %s
@@ -238,10 +243,14 @@ endfunction
 
 function! init#AppendChunks(bufnr, lnum, chunks)
   let line = join(map(copy(a:chunks), "v:val[0]"), '')
-  if nvim_buf_line_count(a:bufnr) > 0
-    call appendbufline(a:bufnr, a:lnum, line)
+  " A freshly loaded buffer holds a single empty line: overwrite it rather than
+  " appending below, so callers don't leave a stray blank line at the top.
+  if nvim_buf_line_count(a:bufnr) == 1 && empty(getbufline(a:bufnr, 1)[0])
+    let lnum = 0
+    call setbufline(a:bufnr, 1, line)
   else
-    call setbufline(a:bufnr, a:lnum, line)
+    let lnum = a:lnum
+    call appendbufline(a:bufnr, a:lnum, line)
   endif
 
   let ns = nvim_create_namespace('ChunkHighlight')
@@ -251,7 +260,7 @@ function! init#AppendChunks(bufnr, lnum, chunks)
     let end_col = start_col + len(msg)
     if end_col > start_col
       let opts = #{end_col: end_col, hl_group: hl_group}
-      call nvim_buf_set_extmark(a:bufnr, ns, a:lnum, start_col, opts)
+      call nvim_buf_set_extmark(a:bufnr, ns, lnum, start_col, opts)
     endif
   endfor
 endfunc
@@ -287,7 +296,14 @@ function! init#CreateCustomBuffer(name, lines)
   call setbufvar(nr, '&bufhidden', 'wipe')
   call bufload(nr)
   call setbufvar(nr, '&modifiable', v:true)
-  call setbufline(nr, 1, a:lines)
+  if !empty(a:lines) && type(a:lines[0]) == v:t_list
+    " Each entry is a list of [text, hl_group] chunks: fill and color per line.
+    for chunks in a:lines
+      call init#AppendChunksAtEnd(nr, chunks)
+    endfor
+  else
+    call setbufline(nr, 1, a:lines)
+  endif
   call setbufvar(nr, '&modifiable', v:false)
   call setbufvar(nr, '&modified', v:false)
   return nr
@@ -309,18 +325,28 @@ function! init#OpenBuffer(nr)
   endif
 endfunction
 
-function! init#OnTermSuccess(id, cb, ...)
+function! init#OnTermExit(id, cb, ...)
   let id = str2nr(a:id)
   let info = nvim_get_chan_info(id)
   let nr = info["buffer"]
   call assert_true(type(a:cb) == type(""))
   let Cb = function(a:cb, a:000)
-  exe printf("autocmd TermClose <buffer=%d> ++once call s:DoTermClose(%d, %s)", nr, nr, string(Cb))
+  exe printf("autocmd TermClose <buffer=%d> ++once call s:DoTermExit(%s)", nr, string(Cb))
 endfunction
 
-function! s:DoTermClose(bufnr, Cb)
-  let status = v:event['status']
-  if status == 0
+function! s:DoTermExit(Cb)
+  call a:Cb(v:event['status'])
+endfunction
+
+function! init#OnTermSuccess(id, cb, ...)
+  let nr = nvim_get_chan_info(str2nr(a:id))["buffer"]
+  call assert_true(type(a:cb) == type(""))
+  let Cb = function(a:cb, a:000)
+  call init#OnTermExit(a:id, 's:DoTermSuccess', nr, Cb)
+endfunction
+
+function! s:DoTermSuccess(bufnr, Cb, status)
+  if a:status == 0
     exe "bw " .. a:bufnr
     call a:Cb()
   endif
@@ -685,13 +711,16 @@ function init#Dispatch(class, prefix, ...)
   " the textual <SNR>N_ form. (No-op when called from script/function context.)
   let prefix = substitute(a:prefix, "\<SNR>", "<SNR>", "")
   let candidates = getcompletion(prefix, 'function')
-  call map(candidates, 'substitute(v:val, "(.*$", "", "")')
-  call filter(candidates, 'strpart(v:val, len(prefix)) =~? cmd')
+  call map(candidates, 'strpart(substitute(v:val, "(.*$", "", ""), len(prefix))')
+  call filter(candidates, 'v:val =~? cmd')
   if len(candidates) != 1
-    echo printf("Cannot dispatch %s...", cmd)
-    return
+    call filter(candidates, 'v:val ==? cmd')
+    if len(candidates) != 1
+      echo printf("Cannot dispatch %s...", cmd)
+      return
+    endif
   endif
-  let Partial = function(candidates[0], args)
+  let Partial = function(prefix .. candidates[0], args)
   try
     call Partial()
   catch
@@ -809,6 +838,10 @@ cabbr Gl Gclog!
 cabbr Gb Git blame
 cabbr Gdt Git! difftool
 cabbr Gmt Git mergetool
+
+" Claude abbreviatons
+cabbr C Claude
+cabbr Cr ClaudeResume
 
 " Capture <Esc> in termal mode
 tnoremap <Esc> <C-\><C-n>
@@ -1284,41 +1317,6 @@ set pumheight=10
 inoremap {<CR> {<CR>}<C-o>O
 
 nmap <leader>sp :setlocal invspell<CR>
-
-function! s:ClaudeInteractive(args) range
-  let root = FugitiveWorkTree()
-  if empty(root)
-    let root = getcwd()
-  endif
-
-  let filename = expand('%:p')
-  if filereadable(filename)
-    let marker = ""
-    if stridx(filename, root) == 0
-      let filename = filename[len(root):]
-      if filename[0] == '/'
-        let filename = filename[1:]
-      endif
-      let marker = "@"
-    endif
-    let whole_file = a:firstline == 1 && a:lastline == line('$')
-    if whole_file
-      let prompt = printf('In %s%s: %s', marker, filename, a:args)
-    else
-      let prompt = printf('In %s%s lines %d-%d: %s', marker, filename, a:firstline, a:lastline, a:args)
-    endif
-  else
-    let context = join(getline(a:firstline, a:lastline), "\n")
-    let prompt = printf("%s\n%s", a:args, context)
-  endif
-
-  below sp
-  enew
-  call init#Termopen(["claude", prompt], #{cwd: root})
-  startinsert
-endfunction
-
-command! -nargs=* -range=% Claude <line1>,<line2>call s:ClaudeInteractive(<q-args>)
 " }}}
 
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
@@ -2388,8 +2386,8 @@ function! init#Sshfs(remote, args)
 endfunction
 
 function! init#Upload(remote, path)
-  let cmd = printf("rsync -pt %s %s:%s", expand("%:p"), a:remote, a:path)
-  let ret = systemlist(cmd)
+  let cmd = printf("rsync -pt %s %s:%s", , a:remote, a:path)
+  let ret = systemlist(["rsync", "-pt", expand("%:p"), printf("%s:%s", a:remote, a:path))
   if v:shell_error
     call init#ShowErrors(ret)
   else
