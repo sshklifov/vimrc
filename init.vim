@@ -144,16 +144,16 @@ endfunction
 command! -nargs=1 -complete=file Rename call <SID>Rename(<q-args>)
 
 function! s:Delete(bang)
-  if !executable("kioclient5")
-    call init#Warn("kioclient5 is not installed!")
+  if !executable("gio")
+    return init#Warn("gio is not installed!")
   endif
+  let file = expand("%:p")
   try
-    let file = expand("%:p")
     exe "bw" . a:bang
   catch
-    echoerr "No write since last change. Add ! to override."
+    return init#Warn("No write since last change. Add ! to override.")
   endtry
-  call init#TryCall('init#SystemOrThrow', ["kioclient5", "move", file, 'trash:/'])
+  call init#TryCall('init#SystemOrThrow', ["gio", "trash", file])
 endfunction
 
 command! -nargs=0 -bang Delete call <SID>Delete('<bang>')
@@ -183,6 +183,8 @@ function! s:LockScreen()
   call rsi#Rest()
   call init#SystemOrThrow("cinnamon-screensaver-command --lock")
 endfunction
+
+command! -nargs=0 Stats call rsi#Print()
 
 command! -nargs=0 Lock call s:LockScreen()
 command! -nargs=0 L call s:LockScreen()
@@ -459,7 +461,7 @@ function! s:ShowJobs()
   endfor
   let lines = map(copy(values), 'v:val.args')
   let nr = qutil#CreateCustomQuickfix(lines, 'Jobs', expand('<SID>') .. 'SelectJob')
-  call setbufvar(nr, 'jobids', keys)
+  call qutil#SetLineData(nr, keys)
 
   let ns = nvim_create_namespace('jobs')
   for i in range(len(values))
@@ -472,7 +474,7 @@ function! s:ShowJobs()
 endfunction
 
 function! s:SelectJob()
-  let id = b:jobids[line('.') - 1]
+  let id = qutil#GetLineData()
   let info = nvim_get_chan_info(str2nr(id))
   if has_key(info, 'buffer')
     call init#OpenBuffer(info.buffer)
@@ -755,7 +757,7 @@ function! init#ToClipboard(msg)
     return
   endif
   silent! let @+ = a:msg
-  if len(a:msg) < 100
+  if len(a:msg) < 140
     echom printf("Copied to clipboard: '%s'.", a:msg)
   else
     echo "Copied to clipboard (truncated)."
@@ -845,6 +847,8 @@ cabbr Cr ClaudeResume
 
 " Capture <Esc> in termal mode
 tnoremap <Esc> <C-\><C-n>
+tnoremap <C-v><Esc> <Esc>
+tnoremap <S-CR> <Esc><CR>
 
 " Display line numbers
 set number
@@ -1359,7 +1363,7 @@ function! s:ToggleQf()
     if !empty(winids)
       call nvim_win_close(winids[0], v:false)
     else
-      copen
+      call qutil#RestoreQuickfix()
     endif
   endif
 endfunction
@@ -1484,50 +1488,37 @@ endfunction
 
 command! -nargs=0 -bar Clangd call init#CreateClangd() | call s:LspRestart()
 
-function! s:CheckClangd(repo)
-  if len(a:repo) <= 0
-    return
-  endif
-  let file = printf("%s/.clangd", a:repo)
-  if !filereadable(file)
-    return
-  endif
-  let lines = readfile(file)
-  let expected = printf("  CompilationDatabase: %s/%s", a:repo, g:BUILD_TYPE)
-  if index(lines, expected) < 0
-    call init#Warn("Detected old .clangd!") 
-  endif
-endfunction
+" TODO
 
-function! s:CheckCMakeCache(repo)
-  if empty(a:repo)
-    return
-  endif
-  let file = printf("%s/%s/CMakeCache.txt", a:repo, g:BUILD_TYPE)
-  if !filereadable(file)
-    return
-  endif
-  let lines = readfile(file)
-  call filter(lines, 'stridx(v:val, g:SDK_DIR) >= 0')
-  if empty(lines)
-    call init#Warn('Detected old CMake build directory!')
-  endif
-endfunction
+" function! s:CheckClangd(repo)
+"   if len(a:repo) <= 0
+"     return
+"   endif
+"   let file = printf("%s/.clangd", a:repo)
+"   if !filereadable(file)
+"     return
+"   endif
+"   let lines = readfile(file)
+"   let expected = printf("  CompilationDatabase: %s/%s", a:repo, g:BUILD_TYPE)
+"   if index(lines, expected) < 0
+"     call init#Warn("Detected old .clangd!") 
+"   endif
+" endfunction
 
-function! s:CheckProjectFiles()
-  if !exists('s:checked_repos')
-    let s:checked_repos = #{}
-  endif
-  let repo = FugitiveWorkTree()
-  if !has_key(s:checked_repos, repo)
-    call s:CheckClangd(repo)
-    call s:CheckCMakeCache(repo)
-    let s:checked_repos[repo] = 1
-  endif
-endfunction
-
-" TODO this needs to be improved/fixed
-" autocmd BufReadPost * call s:CheckProjectFiles()
+" function! s:CheckCMakeCache(repo)
+"   if empty(a:repo)
+"     return
+"   endif
+"   let file = printf("%s/%s/CMakeCache.txt", a:repo, g:BUILD_TYPE)
+"   if !filereadable(file)
+"     return
+"   endif
+"   let lines = readfile(file)
+"   call filter(lines, 'stridx(v:val, g:SDK_DIR) >= 0')
+"   if empty(lines)
+"     call init#Warn('Detected old CMake build directory!')
+"   endif
+" endfunction
 
 function! s:OpenCompileCommands()
   let repo = FugitiveWorkTree()
@@ -1895,33 +1886,11 @@ function! s:OnSymbols(exe, funcs)
   let unmangled = systemlist("c++filt", funcs)
   call map(unmangled, 'v:val[:180]')
   let nr = qutil#CreateCustomQuickfix(unmangled, 'Symbols', 'init#SelectSymbol', a:exe)
-  if nr >= 0
-    " Much faster than binding it in above 'function'.
-    let b:mangled_names = funcs
-    call setbufvar(nr, '&modifiable', v:false)
-    command! -buffer -nargs=1 -bang Cf call s:FilterSymbols("<bang>", <q-args>)
-    command! -buffer -nargs=1 -bang Cff call s:FilterSymbols("<bang>", <q-args>)
-  endif
-endfunction
-
-function! s:FilterSymbols(bang, arg)
-  setlocal modifiable
-  if empty(a:bang)
-    let cmp = ' >= 0'
-  else
-    let cmp = ' < 0'
-  endif
-  let lines = getline(1, '$')
-  call filter(b:mangled_names, 'stridx(lines[v:key], a:arg)' .. cmp)
-  call filter(lines, 'stridx(v:val, a:arg)' .. cmp)
-  call assert_true(len(lines) == len(b:mangled_names))
-  call nvim_buf_set_lines(bufnr(), 0, -1, v:false, lines)
-  setlocal nomodifiable
+  call qutil#SetLineData(nr, funcs)
 endfunction
 
 function! init#SelectSymbol(exe)
-  let idx = line('.') - 1
-  let mangled = b:mangled_names[idx]
+  let mangled = qutil#GetLineData()
   echom "Showing symbol " .. mangled
 
   let cmd = printf('%s -M intel -Sl --disassemble=%s %s', g:objdump_exe, mangled, a:exe)
