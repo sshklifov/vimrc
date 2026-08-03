@@ -1488,37 +1488,34 @@ endfunction
 
 command! -nargs=0 -bar Clangd call init#CreateClangd() | call s:LspRestart()
 
-" TODO
+function! init#CheckClangd(repo)
+  call assert_true(!empty(a:repo))
+  let file = printf("%s/.clangd", a:repo)
+  if !filereadable(file)
+    return init#Warn("Missing .clangd!")
+  endif
+  let lines = readfile(file)
+  let expected = printf("  CompilationDatabase: %s/%s", a:repo, g:BUILD_TYPE)
+  if index(lines, expected) < 0
+    return init#Warn("Detected old .clangd!")
+  endif
+endfunction
 
-" function! s:CheckClangd(repo)
-"   if len(a:repo) <= 0
-"     return
-"   endif
-"   let file = printf("%s/.clangd", a:repo)
-"   if !filereadable(file)
-"     return
-"   endif
-"   let lines = readfile(file)
-"   let expected = printf("  CompilationDatabase: %s/%s", a:repo, g:BUILD_TYPE)
-"   if index(lines, expected) < 0
-"     call init#Warn("Detected old .clangd!") 
-"   endif
-" endfunction
-
-" function! s:CheckCMakeCache(repo)
-"   if empty(a:repo)
-"     return
-"   endif
-"   let file = printf("%s/%s/CMakeCache.txt", a:repo, g:BUILD_TYPE)
-"   if !filereadable(file)
-"     return
-"   endif
-"   let lines = readfile(file)
-"   call filter(lines, 'stridx(v:val, g:SDK_DIR) >= 0')
-"   if empty(lines)
-"     call init#Warn('Detected old CMake build directory!')
-"   endif
-" endfunction
+function! init#CheckCMakeCache(repo)
+  call assert_true(!empty(a:repo))
+  if !exists('g:SDK_DIR')
+    return init#Warn('g:SDK_DIR is not defined!')
+  endif
+  let file = printf("%s/%s/CMakeCache.txt", a:repo, g:BUILD_TYPE)
+  if !filereadable(file)
+    return init#Warn('No %s build directory!', g:BUILD_TYPE)
+  endif
+  let lines = readfile(file)
+  call filter(lines, 'stridx(v:val, g:SDK_DIR) >= 0')
+  if empty(lines)
+    return init#Warn('Detected old CMake build directory!')
+  endif
+endfunction
 
 function! s:OpenCompileCommands()
   let repo = FugitiveWorkTree()

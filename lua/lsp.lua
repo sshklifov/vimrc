@@ -343,8 +343,8 @@ local OnClangdAttach = function(_, bufnr)
   buf_set_keymap('n', 'gs', '<cmd>lua vim.lsp.buf.document_symbol({loclist = false})<CR>', opts)
   -- gS(workspace_symbol) is implemented in init.vim
   buf_set_keymap('n', 'gr', '<cmd>lua vim.lsp.buf.references()<CR>', opts)
-  buf_set_keymap('n', '[d', '<cmd>lua vim.diagnostic.goto_prev({severity = vim.diagnostic.severity.ERROR})<CR>', opts)
-  buf_set_keymap('n', ']d', '<cmd>lua vim.diagnostic.goto_next({severity = vim.diagnostic.severity.ERROR})<CR>', opts)
+  buf_set_keymap('n', '[d', '<cmd>lua vim.diagnostic.jump({count = -1, severity = vim.diagnostic.severity.ERROR})<CR>', opts)
+  buf_set_keymap('n', ']d', '<cmd>lua vim.diagnostic.jump({count = 1, severity = vim.diagnostic.severity.ERROR})<CR>', opts)
   -- buf_set_keymap('n', '<leader>dig', '<cmd>lua vim.diagnostic.setqflist()<CR>', opts)
 
   -- Commands
@@ -374,6 +374,10 @@ vim.diagnostic.config({
 
 vim.lsp.config("clangd", {
   on_attach = OnClangdAttach,
+  on_init = function(client, _)
+    vim.fn['init#CheckClangd'](client.root_dir)
+    vim.fn['init#CheckCMakeCache'](client.root_dir)
+  end,
   init_options = {
     clangdFileStatus = true
   },
