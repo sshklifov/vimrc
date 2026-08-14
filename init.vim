@@ -21,8 +21,6 @@ Plug 'sshklifov/rsi'
 Plug 'sshklifov/git'
 Plug 'sshklifov/claude'
 
-" TODO: Do I want to restore custom quickfix with <leader>cc?
-
 let s:is_work_pc = isdirectory("/opt/aisys")
 if s:is_work_pc
   Plug 'sshklifov/work'
@@ -327,24 +325,32 @@ function! init#OpenBuffer(nr)
   endif
 endfunction
 
-function! init#OnTermExit(id, cb, ...)
-  let id = str2nr(a:id)
-  let info = nvim_get_chan_info(id)
-  let nr = info["buffer"]
+" Run `cmd` (string or list) in a new terminal and call `cb` with the exit
+" status. Takes the command, never a job id: the terminal is spawned here so
+" the handler is attached through the job's own on_exit and a job that exits
+" immediately can't beat us to it. Returns the job id.
+function! init#OnTermExit(cmd, cb, ...)
+  if type(a:cmd) == type(0)
+    throw "Expecting a command, not a job id"
+  endif
   call assert_true(type(a:cb) == type(""))
   let Cb = function(a:cb, a:000)
-  exe printf("autocmd TermClose <buffer=%d> ++once call s:DoTermExit(%s)", nr, string(Cb))
+  return init#Termopen(a:cmd, #{leave_mode: v:false,
+        \ on_exit: {_0, code, _2 -> Cb(code)}})
 endfunction
 
-function! s:DoTermExit(Cb)
-  call a:Cb(v:event['status'])
-endfunction
-
-function! init#OnTermSuccess(id, cb, ...)
-  let nr = nvim_get_chan_info(str2nr(a:id))["buffer"]
+" Like init#OnTermExit, but runs `cb` only when the job succeeds, wiping the
+" terminal buffer first. Returns the job id.
+function! init#OnTermSuccess(cmd, cb, ...)
+  if type(a:cmd) == type(0)
+    throw "Expecting a command, not a job id"
+  endif
   call assert_true(type(a:cb) == type(""))
   let Cb = function(a:cb, a:000)
-  call init#OnTermExit(a:id, 's:DoTermSuccess', nr, Cb)
+  " s:DoTermSuccess wipes the buffer on success, so the queued <C-\><C-n> from
+  " s:LeaveTermMode would land on a dead buffer. Skip it.
+  return init#Termopen(a:cmd, #{leave_mode: v:false,
+        \ on_exit: {id, code, _2 -> s:DoTermSuccess(s:job_map[id]['bufnr'], Cb, code)}})
 endfunction
 
 function! s:DoTermSuccess(bufnr, Cb, status)
@@ -404,12 +410,32 @@ function! s:ForwardExit(Cb, id, code, event)
   endif
 endfunction
 
+" Extra opt on top of jobstart's: leave_mode (default true), see below.
 function! init#Termopen(cmds, ...)
   let opts = get(a:000, 0, #{})
   let opts['term'] = v:true
+  let leave_mode = v:true
+  if has_key(opts, 'leave_mode')
+    let leave_mode = remove(opts, 'leave_mode')
+  endif
   let id = init#Jobstart(a:cmds, opts)
-  let s:job_map[id]['tag'] = 'init#Termopen'
+  let nr = nvim_get_chan_info(id)['buffer']
+  call extend(s:job_map[id], #{tag: 'init#Termopen', bufnr: nr})
+  " Nvim wipes a finished terminal buffer on the next keypress in terminal mode.
+  " Leave terminal mode as soon as the job exits so the output stays around.
+  " Own augroup so callers that wipe the buffer themselves can drop this.
+  if leave_mode
+    augroup TermLeave
+      exe printf('autocmd TermClose <buffer=%d> ++once call s:LeaveTermMode(%d)', nr, nr)
+    augroup END
+  endif
   return id
+endfunction
+
+function! s:LeaveTermMode(nr)
+  if bufnr() == a:nr && mode() ==# 't'
+    call nvim_input("<C-\\><C-n>")
+  endif
 endfunction
 
 " Hide a terminal opened by init#Termopen and only bring it back after `delay` ms
@@ -514,6 +540,58 @@ function! init#OnJobOutput(cmds, cb, ...)
   let id = init#Jobstart(a:cmds, #{stdout_buffered: v:true, on_stdout: WrapCb})
   let s:job_map[id]['tag'] = 'init#OnJobOutput'
   return id
+endfunction
+
+" Streamed stdout ends in an empty element (the stream's final newline). Drop it
+" so the line count is exact, otherwise every count is inflated by one.
+function! s:DropTrailingBlank(lines)
+  if !empty(a:lines) && empty(a:lines[-1])
+    call remove(a:lines, -1)
+  endif
+  return a:lines
+endfunction
+
+" Like init#OnJobOutput, but read stdout as it streams and stop the job once
+" a:max_output lines are in. On exit a:cb gets the collected lines, capped at
+" a:max_output + 1 -- so len(output) > a:max_output means output was truncated.
+function! init#OnJobMaxOutput(cmds, max_output, cb, ...)
+  call assert_true(type(a:cb) == v:t_string)
+  let Cb = function(a:cb, a:000)
+  let collected = []
+  let opts = #{
+        \ on_stdout: function('s:CollectMaxOutput', [collected, a:max_output]),
+        \ on_exit: {id, _1, _2 -> s:ForwardOutput(Cb, id, s:DropTrailingBlank(collected))}
+        \ }
+  let id = init#Jobstart(a:cmds, opts)
+  let s:job_map[id]['tag'] = 'init#OnJobMaxOutput'
+  return id
+endfunction
+
+function! s:CollectMaxOutput(collected, max_output, id, data, ...)
+  " Collect one line past the limit so the callback can tell a truncated run from
+  " one that happened to end on the limit: len(output) > max_output means there
+  " was more to read.
+  let limit = a:max_output + 1
+  " jobstop() does not un-queue chunks already in flight; without this they would
+  " stitch onto a line we have already handed over as complete.
+  if get(s:job_map[a:id], 'maxed', v:false)
+    return
+  endif
+  " Unbuffered stdout arrives split at arbitrary points: data[0] is the rest of
+  " the line we last collected, so stitch it back on instead of adding a line.
+  if !empty(a:collected) && !empty(a:data)
+    let a:collected[-1] ..= a:data[0]
+    call extend(a:collected, a:data[1:])
+  else
+    call extend(a:collected, a:data)
+  endif
+  " The tail element is always a line still being streamed, so it is not complete
+  " until a later chunk terminates it -- counting it would cut us a line short.
+  if len(a:collected) - 1 >= limit
+    call remove(a:collected, limit, -1)
+    let s:job_map[a:id].maxed = v:true
+    call jobstop(a:id)
+  endif
 endfunction
 
 function! init#OnJobExit(cmds, cb, ...)
@@ -835,12 +913,6 @@ set softtabstop=0
 set cinoptions=L0,l1,b0,g1,h1,t0,(s,U1,N-s
 autocmd BufEnter *.cpp,*.cc,*.c,*.h setlocal cc=101
 
-cabbr Gd lefta Gdiffsplit
-cabbr Gl Gclog!
-cabbr Gb Git blame
-cabbr Gdt Git! difftool
-cabbr Gmt Git mergetool
-
 " Claude abbreviatons
 cabbr C Claude
 cabbr Cr ClaudeResume
@@ -848,7 +920,7 @@ cabbr Cr ClaudeResume
 " Capture <Esc> in termal mode
 tnoremap <Esc> <C-\><C-n>
 tnoremap <C-v><Esc> <Esc>
-tnoremap <S-CR> <Esc><CR>
+" tnoremap <S-CR> <Esc><CR>
 
 " Display line numbers
 set number
@@ -1037,15 +1109,18 @@ function! BranchStatusLine()
 endfunction
 
 function! HostStatusLine()
-  if exists('g:HOST')
-    if !work#GetHostStatus()
-      return "%#Conceal#(" .. g:HOST .. ")%#StatusLine#"
-    else
-      return "(" .. g:HOST .. ")"
-    endif
-  else
+  if !exists('g:HOST')
     return ""
   endif
+  " A dead master hides everything else: there is nothing to fuck up yet.
+  if !work#GetHostStatus()
+    return "%#Conceal#(" .. g:HOST .. ")%#StatusLine#"
+  endif
+  " alt is whatever :Scan last pointed at, so most likely someone else's device.
+  if g:HOST == "alt"
+    return "%#@text.warning#(" .. g:HOST .. ")%#StatusLine#"
+  endif
+  return "(" .. g:HOST .. ")"
 endfunction
 
 function! BuildStatusLine()
@@ -1326,14 +1401,17 @@ nmap <leader>sp :setlocal invspell<CR>
 """"""""""""""""""""""""""""Code navigation"""""""""""""""""""""""""""" {{{
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:NextItem(dir)
-  if git#DiffWinid() >= 0
-    if a:dir == "prev"
-      exe "normal! [c"
-    elseif a:dir == "next"
-      exe "normal! ]c"
-    endif
-    return
-  endif
+  " TODO do i really need this?
+  "
+
+  " if git#DiffWinid() >= 0
+  "   if a:dir == "prev"
+  "     exe "normal! [c"
+  "   elseif a:dir == "next"
+  "     exe "normal! ]c"
+  "   endif
+  "   return
+  " endif
 
   let listProps = getqflist({"size": 1, "idx": 0})
   let cmd = "c" . a:dir
@@ -1351,6 +1429,11 @@ function! s:NextItem(dir)
     silent! exe cmd
   endif
 endfunction
+
+" Stop fugitive from shadowing [c/]c with buffer-local hunk motions (K/J remain)
+let g:nremap = {'[c': '', ']c': ''}
+let g:xremap = {'[c': '', ']c': ''}
+let g:oremap = {'[c': '', ']c': ''}
 
 nnoremap <silent> [c :call <SID>NextItem("prev")<CR>
 nnoremap <silent> ]c :call <SID>NextItem("next")<CR>
@@ -2352,13 +2435,8 @@ function! init#Sshfs(remote, args)
 endfunction
 
 function! init#Upload(remote, path)
-  let cmd = printf("rsync -pt %s %s:%s", , a:remote, a:path)
-  let ret = systemlist(["rsync", "-pt", expand("%:p"), printf("%s:%s", a:remote, a:path))
-  if v:shell_error
-    call init#ShowErrors(ret)
-  else
-    call init#ToClipboard(a:path)
-  endif
+  call init#SystemOrThrow(["rsync", "-pt", expand("%:p"), printf("%s:%s", a:remote, a:path)])
+  call init#ToClipboard(a:path)
 endfunction
 
 function! init#RemoteFindFiles(remote, p)
