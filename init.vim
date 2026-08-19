@@ -877,6 +877,28 @@ function! init#PrettyTime(secs)
   endif
 endfunction
 
+" Local midnight to local midnight, so a DST shift cannot land a day in between.
+function! s:DaysAgo(timestamp)
+  let day = strptime("%Y-%m-%d", strftime("%Y-%m-%d", a:timestamp))
+  let today = strptime("%Y-%m-%d", strftime("%Y-%m-%d"))
+  return float2nr(round((today - day) / 86400.0))
+endfunction
+
+" A moment as you would say it: the last week reads as a weekday, older as a date.
+function! init#PrettyDate(timestamp)
+  let days = s:DaysAgo(a:timestamp)
+  if days == 0
+    let label = "Today"
+  elseif days == 1
+    let label = "Yesterday"
+  elseif days > 1 && days <= 7
+    let label = strftime("%A", a:timestamp)
+  else
+    let label = strftime("%Y-%m-%d", a:timestamp)
+  endif
+  return printf("%s %s", label, strftime("%H:%M", a:timestamp))
+endfunction
+
 function! s:RecentBuffers()
   let buffers = map(keys(s:recent_buffers), 'str2nr(v:val)')
   call filter(buffers, 'bufexists(v:val) && filereadable(bufname(v:val))')
