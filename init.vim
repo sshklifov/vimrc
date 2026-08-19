@@ -1145,6 +1145,14 @@ function! HostStatusLine()
   return "(" .. g:HOST .. ")"
 endfunction
 
+" Only the work pc has the plugin which watches jenkins.
+function! JenkinsStatusLine()
+  if !exists('*work#JenkinsStatusLine')
+    return ""
+  endif
+  return work#JenkinsStatusLine()
+endfunction
+
 function! BuildStatusLine()
   if empty(FugitiveWorkTree())
     return ''
@@ -1159,7 +1167,7 @@ function! BuildStatusLine()
   endif
 endfunction
 
-set statusline=%(%{%HostStatusLine()%}%{%BuildStatusLine()%}\ %)
+set statusline=%(%{%HostStatusLine()%}%{%BuildStatusLine()%}%{%JenkinsStatusLine()%}\ %)
 set statusline+=%(%{BranchStatusLine()}\ %)
 set statusline+=%(%{GetFileStatusLine()}\ %{GetProgressStatusLine()}%m%h%r%)
 set statusline+=%=
