@@ -750,7 +750,7 @@ endfunction
 
 function! init#ShowErrors(errors)
   let errors = map(a:errors, "strtrans(v:val)")
-  if empty(errors)
+  if empty(errors) || empty(errors[0])
     let errors = ["<No errors to show>"]
   endif
 
