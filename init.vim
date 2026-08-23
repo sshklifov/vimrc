@@ -1161,7 +1161,7 @@ function! GetProgressStatusLine(...)
 endfunction
 
 function! BranchStatusLine()
-  let want_status = empty(bufname()) || filereadable(bufname())
+  let want_status = empty(bufname()) || filereadable(bufname()) || isdirectory(bufname())
   if !want_status
     return ""
   endif
