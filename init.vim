@@ -410,13 +410,18 @@ function! s:ForwardExit(Cb, id, code, event)
   endif
 endfunction
 
-" Extra opt on top of jobstart's: leave_mode (default true), see below.
+" Extra opts on top of jobstart's: leave_mode (default true) and lock_mode
+" (default false), see below.
 function! init#Termopen(cmds, ...)
   let opts = get(a:000, 0, #{})
   let opts['term'] = v:true
   let leave_mode = v:true
   if has_key(opts, 'leave_mode')
     let leave_mode = remove(opts, 'leave_mode')
+  endif
+  let lock_mode = v:false
+  if has_key(opts, 'lock_mode')
+    let lock_mode = remove(opts, 'lock_mode')
   endif
   let id = init#Jobstart(a:cmds, opts)
   let nr = nvim_get_chan_info(id)['buffer']
@@ -428,6 +433,9 @@ function! init#Termopen(cmds, ...)
     augroup TermLeave
       exe printf('autocmd TermClose <buffer=%d> ++once call s:LeaveTermMode(%d)', nr, nr)
     augroup END
+  endif
+  if lock_mode
+    call init#TermLock(id)
   endif
   return id
 endfunction
@@ -466,6 +474,48 @@ function! s:RevealTerm(id, nr)
     return
   endif
   call init#OpenBuffer(a:nr)
+endfunction
+
+" Refuse the commands that would send a terminal opened by init#Termopen away
+" while its job runs, so a long flash can't be dismissed by accident. A bang
+" still gets through, on purpose; so does closing the window any other way,
+" which merely hides the buffer and leaves the job running.
+" Returns the job id, so it wraps the init#OnTerm* calls directly.
+function! init#TermLock(id)
+  let id = str2nr(a:id)
+  let nr = nvim_get_chan_info(id)['buffer']
+  let group = 'TermLock_' .. id
+  exe 'augroup ' .. group
+  exe printf('autocmd CmdlineLeave : call s:VetoQuit(%d, %d)', id, nr)
+  exe printf('autocmd TermClose,BufWipeout <buffer=%d> ++once call s:Unlock(%s)',
+        \ nr, string(group))
+  exe "augroup END"
+  return id
+endfunction
+
+" Commands that would send the locked terminal away, and ones that would take
+" nvim with it. Bang and arguments excluded: forcing is the way out.
+if !exists('s:lock_quit')
+  const s:lock_quit = '\v^\s*%(q%[uit]|clo%[se]|on%[ly]|hid%[e]|x%[it]|exi%[t]'
+        \ .. '|wq|tabc%[lose]|bd%[elete]|bw%[ipeout]|bun%[load])\s*$'
+  const s:lock_exit = '\v^\s*%(qa%[ll]|quita%[ll]|wqa%[ll]|xa%[ll])\s*$'
+endif
+
+" Nvim can't veto a window close, but it can veto the command line asking for
+" one -- for a mere window close, only the locked terminal's own window.
+function! s:VetoQuit(id, nr)
+  if jobwait([a:id], 0)[0] != -1
+    return
+  endif
+  let cmd = getcmdline()
+  if cmd =~# s:lock_exit || (bufnr() == a:nr && cmd =~# s:lock_quit)
+    let v:event.abort = v:true
+    call init#Warn("Job still running; :q! to give up on it")
+  endif
+endfunction
+
+function! s:Unlock(group)
+  exe 'autocmd! ' .. a:group
 endfunction
 
 function! s:ShowJobs()
