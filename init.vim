@@ -476,46 +476,98 @@ function! s:RevealTerm(id, nr)
   call init#OpenBuffer(a:nr)
 endfunction
 
-" Refuse the commands that would send a terminal opened by init#Termopen away
-" while its job runs, so a long flash can't be dismissed by accident. A bang
-" still gets through, on purpose; so does closing the window any other way,
-" which merely hides the buffer and leaves the job running.
-" Returns the job id, so it wraps the init#OnTerm* calls directly.
+" input() with room to think: a scratch buffer named a:name, shown in the current
+" window, that answers with :w -- which runs a:cb in it, nothing else writes it.
+" Locked, so a stray :q says what to type instead of losing the text. a:opts takes
+" `lines` to start from, `filetype`, the lock's `msg`, and `tied` windows, which
+" go when it does.
+function! init#BufInput(name, opts, cb, ...)
+  call assert_true(type(a:cb) == type(""))
+  let Cb = function(a:cb, a:000)
+  let nr = nvim_create_buf(v:false, v:true)
+  call setbufvar(nr, '&bufhidden', 'wipe')
+  exe 'buffer ' .. nr
+  " :w on a nameless buffer fails before BufWriteCmd ever runs.
+  call nvim_buf_set_name(nr, a:name)
+  setlocal buftype=acwrite noswapfile
+  let &l:filetype = get(a:opts, 'filetype', '')
+  if has_key(a:opts, 'lines')
+    call setline(1, a:opts.lines)
+  endif
+  " ++nested: a callback that wipes the buffer must still fire the BufWipeout
+  " that unlocks it and closes what it was tied to.
+  exe printf('autocmd BufWriteCmd <buffer=%d> ++nested call %s()', nr, string(Cb))
+  for win in get(a:opts, 'tied', [])
+    exe printf('autocmd BufWipeout <buffer=%d> ++once call s:CloseWin(%d)', nr, win)
+  endfor
+  call init#BufLock(nr, get(a:opts, 'msg', "Nothing sent; :w sends it, :q! drops it"))
+  call cursor(1, 1)
+  startinsert!
+  return nr
+endfunction
+
+function! s:CloseWin(win)
+  if nvim_win_is_valid(a:win)
+    call nvim_win_close(a:win, v:true)
+  endif
+endfunction
+
+" Refuse the commands that would send buffer a:nr away while it still matters,
+" warning with a:msg instead. A bang still gets through, on purpose; so does
+" closing the window any other way, which merely hides the buffer. a:1 is a
+" predicate for "still matters", taking no arguments; by default the lock lasts
+" as long as the buffer does.
+function! init#BufLock(nr, msg, ...)
+  let nr = str2nr(a:nr)
+  let s:locks[nr] = #{msg: a:msg, Live: get(a:000, 0, {-> v:true})}
+  let group = 'BufLock_' .. nr
+  exe 'augroup ' .. group
+  exe printf('autocmd CmdlineLeave : call s:VetoQuit(%d)', nr)
+  exe printf('autocmd BufWipeout <buffer=%d> ++once call s:Unlock(%d)', nr, nr)
+  exe 'augroup END'
+  return nr
+endfunction
+
+" Lock the terminal of job a:id for as long as the job runs, so a long flash
+" can't be dismissed by accident. Returns the job id, so it wraps the
+" init#OnTerm* calls directly.
 function! init#TermLock(id)
   let id = str2nr(a:id)
-  let nr = nvim_get_chan_info(id)['buffer']
-  let group = 'TermLock_' .. id
-  exe 'augroup ' .. group
-  exe printf('autocmd CmdlineLeave : call s:VetoQuit(%d, %d)', id, nr)
-  exe printf('autocmd TermClose,BufWipeout <buffer=%d> ++once call s:Unlock(%s)',
-        \ nr, string(group))
-  exe "augroup END"
+  call init#BufLock(nvim_get_chan_info(id)['buffer'],
+        \ "Job still running; :q! to give up on it", {-> jobwait([id], 0)[0] == -1})
   return id
 endfunction
 
-" Commands that would send the locked terminal away, and ones that would take
-" nvim with it. Bang and arguments excluded: forcing is the way out.
+" Commands that would send the locked buffer away, and ones that would take nvim
+" with it. Bang and arguments excluded: forcing is the way out.
 if !exists('s:lock_quit')
   const s:lock_quit = '\v^\s*%(q%[uit]|clo%[se]|on%[ly]|hid%[e]|x%[it]|exi%[t]'
         \ .. '|wq|tabc%[lose]|bd%[elete]|bw%[ipeout]|bun%[load])\s*$'
   const s:lock_exit = '\v^\s*%(qa%[ll]|quita%[ll]|wqa%[ll]|xa%[ll])\s*$'
 endif
 
+if !exists('s:locks')
+  let s:locks = {}
+endif
+
 " Nvim can't veto a window close, but it can veto the command line asking for
-" one -- for a mere window close, only the locked terminal's own window.
-function! s:VetoQuit(id, nr)
-  if jobwait([a:id], 0)[0] != -1
+" one -- for a mere window close, only the locked buffer's own window.
+function! s:VetoQuit(nr)
+  let lock = get(s:locks, a:nr, #{})
+  if empty(lock) || !lock.Live()
     return
   endif
   let cmd = getcmdline()
   if cmd =~# s:lock_exit || (bufnr() == a:nr && cmd =~# s:lock_quit)
     let v:event.abort = v:true
-    call init#Warn("Job still running; :q! to give up on it")
+    " Aborting redraws the command line, wiping whatever we echo now: wait for it.
+    call timer_start(0, {-> init#Warn(lock.msg)})
   endif
 endfunction
 
-function! s:Unlock(group)
-  exe 'autocmd! ' .. a:group
+function! s:Unlock(nr)
+  silent! call remove(s:locks, a:nr)
+  exe 'autocmd! BufLock_' .. a:nr
 endfunction
 
 function! s:ShowJobs()
