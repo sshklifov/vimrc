@@ -1131,13 +1131,9 @@ set list
 set lcs=tab:\|\ 
 
 " Kind of resticts maximum returned length
-if !exists('s:status_toggle')
-  let s:status_max = 70
-endif
-
-command! -nargs=1 Statusline let s:status_max = <f-args>
 
 function! GetFileStatusLine()
+  const status_max = 70
   " Return basename for help files
   if &ft == "help"
     return expand("%:t")
@@ -1158,13 +1154,13 @@ function! GetFileStatusLine()
 
   " Dir is not substring of file -> Display file only
   if !mixedStatus
-    return s:PathShorten(filename, s:status_max)
+    return s:PathShorten(filename, status_max)
   endif
 
   " Display mixed status
   let filename = filename[len(cwd)+1:]
   const sep = "> "
-  return s:PathShorten(cwd . sep . filename, s:status_max)
+  return s:PathShorten(cwd . sep . filename, status_max)
 endfunction
 
 function! s:PathShorten(file, maxwidth)
