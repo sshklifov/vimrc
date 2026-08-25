@@ -1541,6 +1541,10 @@ function! s:NextItem(dir)
   "   return
   " endif
 
+  if qutil#NextItem(a:dir)
+    return
+  endif
+
   let listProps = getqflist({"size": 1, "idx": 0})
   let cmd = "c" . a:dir
   let size = listProps["size"]
