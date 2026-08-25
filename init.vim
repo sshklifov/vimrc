@@ -541,7 +541,7 @@ endfunction
 " Commands that would send the locked buffer away, and ones that would take nvim
 " with it. Bang and arguments excluded: forcing is the way out.
 if !exists('s:lock_quit')
-  const s:lock_quit = '\v^\s*%(q%[uit]|clo%[se]|on%[ly]|hid%[e]|x%[it]|exi%[t]'
+  const s:lock_quit = '\v^\s*%(q%[uit]|clo%[se]|hid%[e]|x%[it]|exi%[t]'
         \ .. '|wq|tabc%[lose]|bd%[elete]|bw%[ipeout]|bun%[load])\s*$'
   const s:lock_exit = '\v^\s*%(qa%[ll]|quita%[ll]|wqa%[ll]|xa%[ll])\s*$'
 endif
