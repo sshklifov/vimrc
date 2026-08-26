@@ -75,6 +75,9 @@ endfunction
 
 command! -nargs=? -complete=customlist,VimscriptCompl Vs call s:ShowPlugins(<q-args>)
 
+" sshklifov/claude
+let g:claude_install_skill = v:true
+
 " sshklifov/git
 let g:git_install = 1
 " Mostly remove search from foldopen
