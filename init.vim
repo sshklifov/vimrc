@@ -1047,7 +1047,10 @@ cabbr Cr ClaudeResume
 " Capture <Esc> in termal mode
 tnoremap <Esc> <C-\><C-n>
 tnoremap <C-v><Esc> <Esc>
-" tnoremap <S-CR> <Esc><CR>
+" Shift-Enter needs an explicit mapping when driven over SSH
+if !empty($SSH_TTY)
+  tnoremap <S-CR> <Esc><CR>
+endif
 
 " Display line numbers
 set number
