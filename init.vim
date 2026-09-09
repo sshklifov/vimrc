@@ -872,6 +872,19 @@ function init#SystemOrThrow(args)
   return output
 endfunction
 
+" Call `cb` after `delay` -- a count with a unit, like '250ms', '30s' or '5m' --
+" with any extra arguments bound to it. Returns the timer id.
+function! init#Timerstart(delay, cb, ...)
+  call assert_true(type(a:cb) == v:t_string)
+  let parts = matchlist(a:delay, '\v^(\d+)(ms|s|m)$')
+  if empty(parts)
+    throw 'Expecting a delay like 250ms, 30s or 5m, not ' .. string(a:delay)
+  endif
+  let scale = #{ms: 1, s: 1000, m: 60000}
+  let Cb = function(a:cb, a:000)
+  return timer_start(str2nr(parts[1]) * scale[parts[2]], {-> Cb()})
+endfunction
+
 function init#TryCall(what, ...)
   let Partial = function(a:what, a:000)
   try
