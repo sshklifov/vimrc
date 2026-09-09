@@ -873,16 +873,48 @@ function init#SystemOrThrow(args)
 endfunction
 
 " Call `cb` after `delay` -- a count with a unit, like '250ms', '30s' or '5m' --
-" with any extra arguments bound to it. Returns the timer id.
-function! init#Timerstart(delay, cb, ...)
+" with any extra arguments bound to it. a:opts takes either `repeat`, which
+" timer_start gets as it is and which makes `delay` the interval, or `slice`,
+" which splits `delay` into that many calls instead. Returns the timer id.
+function! init#Timerstart(delay, opts, cb, ...)
   call assert_true(type(a:cb) == v:t_string)
   let parts = matchlist(a:delay, '\v^(\d+)(ms|s|m)$')
   if empty(parts)
     throw 'Expecting a delay like 250ms, 30s or 5m, not ' .. string(a:delay)
   endif
   let scale = #{ms: 1, s: 1000, m: 60000}
+  let ms = str2nr(parts[1]) * scale[parts[2]]
+  " Slicing sets the repeat count itself, so the two would only fight over it.
+  if has_key(a:opts, 'slice') && has_key(a:opts, 'repeat')
+    throw 'A timer takes slice or repeat, not both: ' .. string(a:opts)
+  endif
+  let repeat = get(a:opts, 'repeat', 1)
+  if has_key(a:opts, 'slice')
+    " The last of the slices lands on the deadline.
+    let repeat = a:opts['slice']
+    let ms = ms / repeat
+  endif
   let Cb = function(a:cb, a:000)
-  return timer_start(str2nr(parts[1]) * scale[parts[2]], {-> Cb()})
+  return timer_start(ms, {-> Cb()}, #{repeat: repeat})
+endfunction
+
+command! -nargs=? Timer call s:StartTimer(<q-args>)
+
+function s:StartTimer(duration)
+  if empty(a:duration) && exists('s:status_timer')
+    call timer_stop(s:status_timer)
+    let s:status_timer = -1
+    let g:statusline_dict['timer'] = ''
+  else
+    let g:statusline_dict['timer'] = '0%'
+    let s:status_timer = init#Timerstart(a:duration, #{slice: 100}, 's:TickTimer')
+  endif
+endfunction
+
+" One slice of the timer went by, so the statusline is a percent richer.
+function s:TickTimer()
+  let percent = str2nr(g:statusline_dict['timer']) + 1
+  let g:statusline_dict['timer'] = percent < 100 ? percent .. '%' : 'TIME IS UP'
 endfunction
 
 function init#TryCall(what, ...)
@@ -1210,7 +1242,7 @@ endfunction
 let g:statusline_dict = #{}
 " Must register modules here. When multiple modules have progress output, items at the front of the
 " list will take precedence
-let g:statusline_prio = ['sync', 'make', 'jenkins', 'lsp', 'rsi']
+let g:statusline_prio = ['sync', 'make', 'jenkins', 'lsp', 'timer', 'rsi']
 
 function! OnStatusDictChange(...)
   redrawstatus
