@@ -314,9 +314,24 @@ endfunction
 
 function! init#CustomBottomBuffer(name, lines)
   let nr = init#CreateCustomBuffer(a:name, a:lines)
-  bot sp
+  call init#SmartSplit('bot')
   exe "b " .. nr
   return nr
+endfunction
+
+" Land in a blank unnamed buffer: the current one if it is, otherwise a split
+" onto a hidden blank one left behind earlier, or a fresh one.
+function! init#SmartSplit(...)
+  let Blank = {nr -> empty(bufname(nr)) && empty(getbufvar(nr, '&buftype'))
+        \ && !getbufvar(nr, '&modified') && getbufline(nr, 1, 2) == ['']}
+  " TODO
+  " if Blank(bufnr())
+    " return
+  " endif
+  exe get(a:000, 0, '') .. ' split'
+  let pool = filter(map(getbufinfo(), 'v:val.bufnr'),
+        \ {_, nr -> empty(win_findbuf(nr)) && Blank(nr)})
+  exe empty(pool) ? 'enew' : 'buffer ' .. pool[0]
 endfunction
 
 function! init#OpenBuffer(nr)
@@ -324,7 +339,8 @@ function! init#OpenBuffer(nr)
   if !empty(wins)
     call win_gotoid(wins[0])
   else
-    exe 'bot sb ' .. a:nr
+    call init#SmartSplit('bot')
+    exe 'b ' .. a:nr
   endif
 endfunction
 
@@ -2607,8 +2623,7 @@ function! init#RemoteAttach(host, proc, ...)
 endfunction
 
 function! init#SshTerminal()
-  below sp
-  enew
+  call init#SmartSplit('below')
   call init#Termopen(["ssh", g:HOST])
   startinsert
 endfunction
