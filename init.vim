@@ -2670,12 +2670,12 @@ function! init#RemoteRecentFiles(remote, ...)
 endfunction
 
 " Checks whether a TCP port on 'ip' is reachable, without blocking, then calls
-" 'cb' with 1 if it is and 0 if not. A drop by a firewall costs the 1 s timeout;
+" 'cb' with the port and 1 if it is reachable, 0 if not. A drop by a firewall costs the 1 s timeout;
 " nothing listening fails immediately.
 function! init#OnPortCheck(ip, port, cb)
   let Cb = function(a:cb)
   call init#Jobstart(["nc", "-z", "-w1", a:ip, a:port],
-        \ #{on_exit: {_id, code, _ev -> Cb(code == 0)}})
+        \ #{on_exit: {_id, code, _ev -> Cb(a:port, code == 0)}})
 endfunction
 "}}}
 
