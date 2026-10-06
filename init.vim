@@ -376,6 +376,8 @@ function! s:DoTermSuccess(bufnr, Cb, status)
   if a:status == 0
     exe "bw " .. a:bufnr
     call a:Cb()
+  else
+    call s:LeaveTermMode(a:bufnr)
   endif
 endfunction
 
