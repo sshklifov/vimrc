@@ -21,7 +21,7 @@ Plug 'sshklifov/rsi'
 Plug 'sshklifov/git'
 Plug 'sshklifov/claude'
 
-let s:is_work_pc = isdirectory("/opt/aisys")
+let s:is_work_pc = has("linux") && isdirectory("/opt/aisys")
 if s:is_work_pc
   Plug 'sshklifov/work'
 endif
@@ -1296,7 +1296,7 @@ function! BranchStatusLine()
 endfunction
 
 function! HostStatusLine()
-  if !exists('g:HOST')
+  if !s:is_work_pc || !exists('g:HOST')
     return ""
   endif
   " A dead master hides everything else: there is nothing to fuck up yet.
