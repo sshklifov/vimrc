@@ -1168,13 +1168,11 @@ function! init#ReadShada()
   let s:shada_newer_host = ""
 endfunction
 
+" Callers flush on purpose, so our globals win over another instance's
 function! init#FlushShada()
-  if init#IsShadaStale()
-    echom "Shada was flushed by another instance, read it first"
-    return
-  endif
   call s:WithShadaVarsOnly("wshada!")
   let s:shada_vars_mtime = s:ShadaVarsMtime()
+  let s:shada_newer_host = ""
 endfunction
 
 function! init#IsShadaStale()
@@ -1365,11 +1363,11 @@ function! HostStatusLine()
   endif
   " A dead master hides everything else: there is nothing to fuck up yet.
   if !work#GetHostStatus()
-    return "%#DiagnosticError#(" .. g:HOST .. ")%#StatusLine#"
+    return "%#Conceal#(" .. g:HOST .. ")%#StatusLine#"
   endif
   " Another vim flushed a different host
   if !empty(s:shada_newer_host) && s:shada_newer_host !=# g:HOST
-    return "%#Conceal#(" .. g:HOST .. "→" .. s:shada_newer_host .. ")%#StatusLine#"
+    return "%#DiagnosticInfo#(" .. g:HOST .. ")%#StatusLine#"
   endif
   " alt is whatever :Scan last pointed at, so most likely someone else's device.
   if g:HOST == "alt"
