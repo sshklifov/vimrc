@@ -2,7 +2,6 @@
 
 call plug#begin()
 
-Plug 'tpope/vim-sensible'
 Plug 'tpope/vim-commentary'
 Plug 'tpope/vim-endwise'
 Plug 'tpope/vim-surround'
@@ -1143,8 +1142,53 @@ nnoremap <C-w>t <C-w>T
 nnoremap <silent> zA :set invfoldenable<CR>
 let mapleader = "\\"
 
-" Increase oldfiles size
-set shada=!,'10000,<0,s500,h
+" Increase oldfiles size. Globals live in vars.shada, see init#FlushShada()
+set shada='10000,<0,s500,h
+
+let s:shada_vars_file = stdpath("state") .. "/shada/vars.shada"
+
+function! s:ShadaVarsMtime()
+  let stat = luaeval('vim.uv.fs_stat(_A)', s:shada_vars_file)
+  return type(stat) == v:t_dict ? stat.mtime : {}
+endfunction
+
+function! s:WithShadaVarsOnly(cmd)
+  let save = &shada
+  let vars_only = "!,'0,<0,:0,/0,@0,h"
+  let &shada = vars_only
+  try
+    exe a:cmd .. " " .. fnameescape(s:shada_vars_file)
+  finally
+    let &shada = save
+  endtry
+endfunction
+
+" Adopt the globals last flushed by any instance
+function! init#ReadShada()
+  if filereadable(s:shada_vars_file)
+    call s:WithShadaVarsOnly("rshada")
+  endif
+  let s:shada_vars_mtime = s:ShadaVarsMtime()
+endfunction
+
+function! init#FlushShada()
+  if init#IsShadaStale()
+    echom "Shada was flushed by another instance, read it first"
+    return
+  endif
+  call s:WithShadaVarsOnly("wshada!")
+  let s:shada_vars_mtime = s:ShadaVarsMtime()
+endfunction
+
+function! init#IsShadaStale()
+  return s:ShadaVarsMtime() != s:shada_vars_mtime
+endfunction
+
+if !exists("s:shada_vars_mtime")
+  call init#ReadShada()
+endif
+autocmd VimLeavePre * if !init#IsShadaStale() | call init#FlushShada() | endif
+
 " Save undo history
 set undofile
 
