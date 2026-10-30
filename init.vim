@@ -1169,6 +1169,7 @@ function! init#ReadShada()
     call s:WithShadaVarsOnly("rshada")
   endif
   let s:shada_vars_mtime = s:ShadaVarsMtime()
+  let s:shada_newer_host = ""
 endfunction
 
 function! init#FlushShada()
@@ -1184,8 +1185,29 @@ function! init#IsShadaStale()
   return s:ShadaVarsMtime() != s:shada_vars_mtime
 endfunction
 
+" Entries come flat: type, timestamp, length, data. Variables are type 6
+function! s:ShadaVarsHost()
+  let entries = msgpackparse(readfile(s:shada_vars_file, "b"))
+  for i in range(0, len(entries) - 1, 4)
+    if entries[i] == 6 && entries[i + 3][0] ==# "HOST"
+      return entries[i + 3][1]
+    endif
+  endfor
+  return ""
+endfunction
+
+function! s:OnShadaVarsEvent(fname)
+  if a:fname ==# fnamemodify(s:shada_vars_file, ":t") && init#IsShadaStale()
+    let s:shada_newer_host = s:ShadaVarsHost()
+    redrawstatus
+  endif
+endfunction
+
 if !exists("s:shada_vars_mtime")
   call init#ReadShada()
+  " wshada renames over the file, so only a watch on the directory survives it
+  call luaeval('vim.uv.new_fs_event():start(_A[1], {}, vim.schedule_wrap(function(_, fname) vim.fn[_A[2]](fname) end))',
+        \ [fnamemodify(s:shada_vars_file, ":h"), expand("<SID>") .. "OnShadaVarsEvent"])
 endif
 autocmd VimLeavePre * if !init#IsShadaStale() | call init#FlushShada() | endif
 
@@ -1347,7 +1369,11 @@ function! HostStatusLine()
   endif
   " A dead master hides everything else: there is nothing to fuck up yet.
   if !work#GetHostStatus()
-    return "%#Conceal#(" .. g:HOST .. ")%#StatusLine#"
+    return "%#DiagnosticError#(" .. g:HOST .. ")%#StatusLine#"
+  endif
+  " Another vim flushed a different host
+  if !empty(s:shada_newer_host) && s:shada_newer_host !=# g:HOST
+    return "%#Conceal#(" .. g:HOST .. "→" .. s:shada_newer_host .. ")%#StatusLine#"
   endif
   " alt is whatever :Scan last pointed at, so most likely someone else's device.
   if g:HOST == "alt"
